@@ -1,0 +1,20 @@
+{
+  "name": "lane-four-resource-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Lane Four Team Performance Dashboard - Managed Services delivery dashboard",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7"
+  }
+}
