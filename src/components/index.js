@@ -7,3 +7,4 @@ export { default as DeltaCell } from "./DeltaCell.jsx";
 export { default as Chip } from "./Chip.jsx";
 export { default as DropZone } from "./DropZone.jsx";
 export { default as AuditPanel } from "./AuditPanel.jsx";
+export { default as ControlsBar } from "./ControlsBar.jsx";
