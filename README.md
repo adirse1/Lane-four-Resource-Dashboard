@@ -35,7 +35,22 @@ npm run dev:live # terminal 2: dev server on :5173, fixtures OFF
 - `npm run dev` (fixtures) needs no proxy and no credentials — best for UI work.
 
 Data access lives behind `callSF` in [src/lib/salesforce.js](src/lib/salesforce.js);
-fixtures vs live is decided in [src/lib/env.js](src/lib/env.js).
+the mode (fixtures / proxy / oauth) is decided in [src/lib/env.js](src/lib/env.js).
+
+### Deploy (hosted, live for everyone)
+
+The production build uses **Salesforce OAuth (PKCE)**: each viewer signs in with
+their own Salesforce account and queries directly from the browser — no backend, no
+secrets in the build, per-viewer permissions. Hosted free on GitHub Pages via
+[.github/workflows/deploy.yml](.github/workflows/deploy.yml).
+
+Full setup (Connected App, CORS allowlist, Pages) is in **[DEPLOY.md](DEPLOY.md)**.
+
+| Mode | Command | Data source |
+|------|---------|-------------|
+| fixtures | `npm run dev` | local sample data |
+| proxy | `npm run proxy` + `npm run dev:live` | your sf CLI auth (local) |
+| oauth | `npm run build` (deployed) | each viewer's Salesforce login |
 
 ## Architecture
 

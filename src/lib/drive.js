@@ -1,11 +1,21 @@
-// Hierarchy persistence. Originally Google Drive (hierarchy.json) via an MCP
-// natural-language prompt; locally it goes through the proxy's /api/hierarchy
-// file store. In fixtures mode there is no persistence (load returns null, save
-// is a no-op), so the tree is built fresh from Salesforce each session.
-import { USE_FIXTURES } from "./env.js";
+// Hierarchy persistence, per runtime mode:
+//   fixtures  no persistence (rebuilt from Salesforce each session)
+//   proxy     server/data/hierarchy.json via the local proxy (/api/hierarchy)
+//   oauth     this viewer's browser localStorage
+//
+// Note: in production (oauth) the arrangement is per-viewer, not org-shared. To
+// share one hierarchy across everyone, persist it to Salesforce (a custom object
+// or Document) — a future enhancement.
+import { MODE } from "./env.js";
+
+const LS_KEY = "lf_hierarchy";
 
 export async function loadHierarchy() {
-  if (USE_FIXTURES) return null;
+  if (MODE === "fixtures") return null;
+  if (MODE === "oauth") {
+    try { const j = JSON.parse(localStorage.getItem(LS_KEY)); return j?.directors ? j : null; }
+    catch { return null; }
+  }
   try {
     const r = await fetch("/api/hierarchy");
     if (!r.ok) return null;
@@ -17,7 +27,8 @@ export async function loadHierarchy() {
 }
 
 export async function saveHierarchy(h) {
-  if (USE_FIXTURES) return true;
+  if (MODE === "fixtures") return true;
+  if (MODE === "oauth") { localStorage.setItem(LS_KEY, JSON.stringify(h)); return true; }
   const r = await fetch("/api/hierarchy", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
