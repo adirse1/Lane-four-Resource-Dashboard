@@ -6,8 +6,18 @@
 // claude.ai artifact, where the MCP connectors are wired for you. To run locally
 // you either supply real credentials or stub callSF / callDrive with JSON fixtures.
 
+import { sfFixture, driveFixture } from "./fixtures.js";
+
 const SF_MCP_URL = "https://api.salesforce.com/platform/mcp/v1/platform/sobject-reads";
 const DRIVE_MCP_URL = "https://drivemcp.googleapis.com/mcp/v1";
+
+// In local dev, default to sample fixtures (no Salesforce/Drive credentials needed).
+// Opt out with VITE_USE_FIXTURES=false to hit the real MCP connectors. Production
+// builds never use fixtures.
+const USE_FIXTURES =
+  typeof import.meta !== "undefined" &&
+  import.meta.env?.DEV &&
+  import.meta.env?.VITE_USE_FIXTURES !== "false";
 
 export async function callClaude(prompt, mcpUrl, mcpName) {
   const body = { model: "claude-sonnet-4-6", max_tokens: 1000, messages: [{ role: "user", content: prompt }] };
@@ -24,7 +34,12 @@ export async function callClaude(prompt, mcpUrl, mcpName) {
   return null;
 }
 
-export const callSF = (soql) =>
-  callClaude("Execute this SOQL and return ONLY the raw JSON result, no explanation, no markdown:\n\n" + soql, SF_MCP_URL, "sf");
+export const callSF = (soql) => {
+  if (USE_FIXTURES) return Promise.resolve(sfFixture(soql));
+  return callClaude("Execute this SOQL and return ONLY the raw JSON result, no explanation, no markdown:\n\n" + soql, SF_MCP_URL, "sf");
+};
 
-export const callDrive = (prompt) => callClaude(prompt, DRIVE_MCP_URL, "drive");
+export const callDrive = (prompt) => {
+  if (USE_FIXTURES) return Promise.resolve(driveFixture(prompt));
+  return callClaude(prompt, DRIVE_MCP_URL, "drive");
+};
