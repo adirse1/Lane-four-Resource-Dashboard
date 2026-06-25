@@ -6,3 +6,4 @@ export { default as HelpIcon } from "./HelpIcon.jsx";
 export { default as DeltaCell } from "./DeltaCell.jsx";
 export { default as Chip } from "./Chip.jsx";
 export { default as DropZone } from "./DropZone.jsx";
+export { default as AuditPanel } from "./AuditPanel.jsx";
