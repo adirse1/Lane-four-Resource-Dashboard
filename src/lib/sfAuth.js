@@ -71,7 +71,12 @@ export async function handleRedirect() {
   sessionStorage.removeItem(VERIFIER_KEY);
   // Clean the code/state out of the URL regardless of outcome.
   window.history.replaceState({}, document.title, redirectUri());
-  if (!resp.ok) throw new Error("Token exchange failed (" + resp.status + ")");
+  if (!resp.ok) {
+    let detail = "";
+    try { const e = await resp.json(); detail = e.error_description || e.error || JSON.stringify(e); }
+    catch { detail = await resp.text().catch(() => ""); }
+    throw new Error("Token exchange failed (" + resp.status + ")" + (detail ? ": " + detail : ""));
+  }
   const tok = await resp.json();
   sessionStorage.setItem(STORE_KEY, JSON.stringify({ access_token: tok.access_token, instance_url: tok.instance_url }));
   return true;
