@@ -32,10 +32,10 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build
+        # Salesforce OAuth config comes from the committed .env.production.
+        # Only the Pages base path is injected here (derived from the repo name).
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
-          VITE_SF_CLIENT_ID: ${{ vars.VITE_SF_CLIENT_ID }}
-          VITE_SF_LOGIN_URL: ${{ vars.VITE_SF_LOGIN_URL }}
         run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
