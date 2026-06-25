@@ -12,15 +12,30 @@ frozen pre-refactor original lives in
 
 ```bash
 npm install      # one-time. On this machine, prefix: NODE_OPTIONS=--use-system-ca npm install
-npm run dev      # dev server at http://localhost:5173
+npm run dev      # dev server at :5173 with SAMPLE FIXTURES (no credentials)
 npm run build    # production build to dist/
 npm test         # query + working-day regression tests (Node built-in runner)
 ```
 
-Live data needs the Salesforce + Drive MCP connectors wired (they are, inside a
-claude.ai artifact) or real credentials locally. Without them, the UI renders but
-data calls fail gracefully. For UI-only iteration, stub `callSF` / `callDrive` in
-[src/lib/salesforce.js](src/lib/salesforce.js) with JSON fixtures.
+### Live Salesforce data (local)
+
+Two processes, two terminals:
+
+```bash
+npm run proxy    # terminal 1: SF proxy on :8787, reuses your sf CLI auth
+npm run dev:live # terminal 2: dev server on :5173, fixtures OFF
+```
+
+- The proxy ([server/proxy.mjs](server/proxy.mjs)) mints an access token from the
+  `sf` CLI and forwards SOQL to Salesforce's REST Query API. No Anthropic key, no
+  token cost. `GET http://localhost:8787/api/health` verifies the connection.
+- It targets the org named in `server/.sforg` (gitignored) or the `SF_ORG` env var,
+  else your sf default org. The Lane Four PSA org is `lf-prod`.
+- The team hierarchy persists to `server/data/hierarchy.json` (gitignored).
+- `npm run dev` (fixtures) needs no proxy and no credentials — best for UI work.
+
+Data access lives behind `callSF` in [src/lib/salesforce.js](src/lib/salesforce.js);
+fixtures vs live is decided in [src/lib/env.js](src/lib/env.js).
 
 ## Architecture
 
@@ -81,15 +96,18 @@ Forecast/scheduling from **`pse__Assignment__c`**: scheduled hours
 Pod = the Project Manager field on the timecard
 (`pse__Project__r.pse__Project_Manager__r.Name`). More reliable than Practice for Meghan's team.
 
-## Sanity numbers (April 2026) — regression anchors
+## Sanity numbers (April 2026)
 
-- Total revenue: $401,208 CAD
-- RPD: ~$19,105
-- Working days: 21 (CA) — pinned in [tests/holidays.test.js](tests/holidays.test.js)
+- Working days: 21 (CA) — calendar math, a true invariant. Pinned in
+  [tests/holidays.test.js](tests/holidays.test.js).
+- Revenue / RPD: the README originally cited $401,208 / ~$19,105 as a point-in-time
+  snapshot. Against live `lf-prod` data (April now fully closed and approved) the
+  figure is higher (~$502k as of 2026-06). Treat the dollar figures as a snapshot,
+  NOT a fixed regression anchor — only the working-day count is invariant. The SOQL
+  itself is regression-tested byte-for-byte in [tests/queries.test.js](tests/queries.test.js).
 
-If a change moves these, something broke. Holidays toggled OFF count as working
-days. Fiscal year starts July 1 (Q1 Jul–Sep … Q4 Apr–Jun). Canada observes Good
-Friday but not Easter Monday.
+Holidays toggled OFF count as working days. Fiscal year starts July 1
+(Q1 Jul–Sep … Q4 Apr–Jun). Canada observes Good Friday but not Easter Monday.
 
 ## Tests
 

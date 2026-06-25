@@ -5,10 +5,10 @@
 // Note: the Drive save confirmation is brittle (any non-error response reads as
 // success). Known bug, preserved here verbatim — flag before "fixing".
 import { useState, useEffect, useCallback } from "react";
-import { callSF, callDrive } from "../lib/salesforce.js";
+import { callSF } from "../lib/salesforce.js";
+import { loadHierarchy as driveLoad, saveHierarchy as driveSave } from "../lib/drive.js";
 import { hierarchyAssignments } from "../lib/queries.js";
 import { buildSeed, getAssigned } from "../lib/hierarchy.js";
-import { FOLDER_ID } from "../constants/brand.js";
 
 export function useHierarchy() {
   const [H, setH] = useState(null);
@@ -41,21 +41,20 @@ export function useHierarchy() {
     if (!H) return;
     setSaveStatus("Saving...");
     try {
-      const content = JSON.stringify(H, null, 2);
-      await callDrive('In Google Drive folder ID "' + FOLDER_ID + '", create or replace a file named "hierarchy.json" with this exact JSON content:\n\n' + content + '\n\nConfirm success.');
+      await driveSave(H);
       setSaveStatus("Saved " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-      setStatus({ msg: "Synced with Drive", type: "g" });
+      setStatus({ msg: "Hierarchy saved", type: "g" });
     } catch (e) { setSaveStatus("Save failed"); }
   }, [H]);
 
-  // On mount: try Drive first, then sync from Salesforce.
+  // On mount: try the saved hierarchy first, then sync people from Salesforce.
   useEffect(() => {
     const load = async () => {
-      setLoading(true); setLoadMsg("Loading hierarchy from Drive...");
+      setLoading(true); setLoadMsg("Loading saved hierarchy...");
       try {
-        const saved = await callDrive('In Google Drive folder ID "' + FOLDER_ID + '", find the file named "hierarchy.json" and return its complete text content. Return ONLY the raw JSON.');
-        if (saved && saved.directors) { setH(saved); setStatus({ msg: "Loaded from Drive", type: "g" }); }
-      } catch (e) { console.warn("Drive:", e.message); }
+        const saved = await driveLoad();
+        if (saved && saved.directors) { setH(saved); setStatus({ msg: "Loaded saved hierarchy", type: "g" }); }
+      } catch (e) { console.warn("Hierarchy load:", e.message); }
       await syncSF();
     };
     load();

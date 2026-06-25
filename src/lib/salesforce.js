@@ -1,24 +1,28 @@
-// The single choke-point for every Salesforce and Google Drive call.
-// Everything routes through callClaude (the Anthropic API-in-artifacts MCP pattern).
-// Do NOT reintroduce inline fetch for data anywhere else.
+// Data access. Two modes (see env.js):
+//   fixtures  -> local sample data (npm run dev)
+//   live      -> POST /api/sf to the local proxy, which reuses your sf CLI auth
+//                and forwards SOQL to Salesforce's REST Query API (npm run dev:live)
 //
-// Local dev note: this fetch to api.anthropic.com with mcp_servers works inside a
-// claude.ai artifact, where the MCP connectors are wired for you. To run locally
-// you either supply real credentials or stub callSF / callDrive with JSON fixtures.
+// callClaude is retained for the AI workflow (vacation-coverage / sendPrompt),
+// which talks to the Anthropic Messages API. It is NOT used for data anymore.
+import { USE_FIXTURES } from "./env.js";
+import { sfFixture } from "./fixtures.js";
 
-import { sfFixture, driveFixture } from "./fixtures.js";
+export async function callSF(soql) {
+  if (USE_FIXTURES) return sfFixture(soql);
+  const resp = await fetch("/api/sf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ soql }),
+  });
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error("SF proxy " + resp.status + (detail ? ": " + detail : ""));
+  }
+  return resp.json();
+}
 
-const SF_MCP_URL = "https://api.salesforce.com/platform/mcp/v1/platform/sobject-reads";
-const DRIVE_MCP_URL = "https://drivemcp.googleapis.com/mcp/v1";
-
-// In local dev, default to sample fixtures (no Salesforce/Drive credentials needed).
-// Opt out with VITE_USE_FIXTURES=false to hit the real MCP connectors. Production
-// builds never use fixtures.
-const USE_FIXTURES =
-  typeof import.meta !== "undefined" &&
-  import.meta.env?.DEV &&
-  import.meta.env?.VITE_USE_FIXTURES !== "false";
-
+// ── Anthropic Messages API (for the AI workflow only) ────────────────────────────
 export async function callClaude(prompt, mcpUrl, mcpName) {
   const body = { model: "claude-sonnet-4-6", max_tokens: 1000, messages: [{ role: "user", content: prompt }] };
   if (mcpUrl) body.mcp_servers = [{ type: "url", url: mcpUrl, name: mcpName }];
@@ -33,13 +37,3 @@ export async function callClaude(prompt, mcpUrl, mcpName) {
   if (tx?.text) { const m = tx.text.match(/\{[\s\S]*\}/); if (m) { try { return JSON.parse(m[0]); } catch {} } return tx.text; }
   return null;
 }
-
-export const callSF = (soql) => {
-  if (USE_FIXTURES) return Promise.resolve(sfFixture(soql));
-  return callClaude("Execute this SOQL and return ONLY the raw JSON result, no explanation, no markdown:\n\n" + soql, SF_MCP_URL, "sf");
-};
-
-export const callDrive = (prompt) => {
-  if (USE_FIXTURES) return Promise.resolve(driveFixture(prompt));
-  return callClaude(prompt, DRIVE_MCP_URL, "drive");
-};

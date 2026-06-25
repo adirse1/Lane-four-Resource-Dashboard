@@ -6,6 +6,8 @@
   "description": "Lane Four Team Performance Dashboard - Managed Services delivery dashboard",
   "scripts": {
     "dev": "vite",
+    "dev:live": "vite --mode live",
+    "proxy": "node --use-system-ca server/proxy.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test"

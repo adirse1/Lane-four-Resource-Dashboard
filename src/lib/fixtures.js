@@ -130,10 +130,3 @@ export function sfFixture(soql) {
 
   return { records: [] };
 }
-
-// Resolve a Drive prompt. Loading hierarchy.json returns null so the app falls
-// through to building the tree from Salesforce; saving returns a success string.
-export function driveFixture(prompt) {
-  if (prompt.includes("create or replace")) return "Saved successfully.";
-  return null;
-}

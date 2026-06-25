@@ -17,13 +17,18 @@ architecture, the Salesforce data model, the director/pod structure, the April
   SOQL field choices (timecard split vs header, `Total_Billable_Amount_Formula__c`,
   the `SRC` scope) without flagging it. The query tests will fail if you do — that
   is intentional; update the snapshot only with explicit sign-off.
-- Every Salesforce call goes through `callSF`, every Drive call through `callDrive`
-  ([lib/salesforce.js](src/lib/salesforce.js)). Never reintroduce inline `fetch` for data.
+- Every Salesforce query goes through `callSF` ([lib/salesforce.js](src/lib/salesforce.js)),
+  which is fixtures (dev) or the local proxy (live). Hierarchy persistence goes
+  through [lib/drive.js](src/lib/drive.js). Never reintroduce inline `fetch` for data.
+  `callClaude` is reserved for the AI workflow (vacation coverage), not data.
+- Live data runs via `npm run proxy` + `npm run dev:live` against the `lf-prod`
+  org ([server/proxy.mjs](server/proxy.mjs), org in gitignored `server/.sforg`).
 - Holiday/working-day math has one source: the Options `hState` toggles via
   `getEnabledHols` / `calcWD` ([lib/holidays.js](src/lib/holidays.js)). Do not hardcode holidays.
 - New SOQL goes in `lib/queries.js` as a builder, never inline in a hook or tab.
-- After any change: `npm test` must pass and `npm run build` must succeed. The
-  April 2026 numbers ($401,208 / ~$19,105 RPD / 21 days) must still hold.
+- After any change: `npm test` must pass and `npm run build` must succeed. Working
+  days for April 2026 = 21 is the invariant; the dollar sanity numbers are a stale
+  point-in-time snapshot (live is ~$502k), so do not treat them as a hard anchor.
 - When you make several edits in sequence, grep to confirm each applied. Tool
   success messages alone are not proof.
 
