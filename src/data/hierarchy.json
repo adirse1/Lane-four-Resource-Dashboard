@@ -1,0 +1,130 @@
+{
+  "directors": [
+    {
+      "name": "Aldus Behan",
+      "color": {
+        "bg": "rgba(44,204,211,0.12)",
+        "tx": "#0B8F95"
+      },
+      "pods": [
+        {
+          "name": "Michelle Clark",
+          "members": [
+            "Michelle Clark",
+            "Kathryn McLennan"
+          ],
+          "expanded": true
+        },
+        {
+          "name": "Lindsay Chown",
+          "members": [
+            "Ben Lee",
+            "Lindsay Chown",
+            "Jackie Donald",
+            "Jordan Roylance"
+          ],
+          "expanded": true
+        },
+        {
+          "name": "Julie Holm",
+          "members": [
+            "Gregory Baronian",
+            "Julie Holm",
+            "Aleksa Bjelakovic"
+          ],
+          "expanded": true
+        },
+        {
+          "name": "Josh Wright",
+          "members": [
+            "Josh Wright",
+            "Igor Radic",
+            "Tom Long"
+          ],
+          "expanded": true
+        }
+      ],
+      "directMembers": [
+        "Aldus Behan"
+      ],
+      "expanded": true
+    },
+    {
+      "name": "Meghan Saunders",
+      "color": {
+        "bg": "rgba(255,92,57,0.10)",
+        "tx": "#993C1D"
+      },
+      "pods": [
+        {
+          "name": "Will Shorthouse",
+          "members": [
+            "Godfrey Ho",
+            "Karim Soweid",
+            "Luke Atack",
+            "Will Shorthouse"
+          ],
+          "expanded": true
+        },
+        {
+          "name": "Vesna Sorgic",
+          "members": [
+            "Clarine Chan",
+            "Diana Cazan",
+            "Vesna Sorgic"
+          ],
+          "expanded": true
+        },
+        {
+          "name": "Brandon Wilson",
+          "members": [],
+          "expanded": true
+        },
+        {
+          "name": "Malcolm McMullin",
+          "members": [],
+          "expanded": true
+        }
+      ],
+      "directMembers": [
+        "Malcolm McMullin",
+        "Lorin Hoback",
+        "Brandon Wilson",
+        "Meghan Saunders"
+      ],
+      "expanded": true
+    }
+  ],
+  "unassigned": [
+    "Andrew Konieczny",
+    "Ryley Hayes",
+    "Anastasiya Dvuzhylov",
+    "David Chapman",
+    "Dylan McAllister",
+    "Jess Pereira",
+    "Jessica Gray",
+    "Prashyen Kanagarajah",
+    "Sami Islam",
+    "Tatiane Sensini",
+    "Alexander Greco",
+    "Amy Blackburn",
+    "Sam McPartlan",
+    "Alexandra Strambu",
+    "Micah Lindo",
+    "Dave Hahn",
+    "Tamara Saldina",
+    "Nupur Patel",
+    "Melissa Sherman",
+    "Sai Sravan-Surapaneni",
+    "Raymond Harvey",
+    "Blair Mackenzie",
+    "William Amui",
+    "Gina Gravina",
+    "Natalia Assis",
+    "Ryan Blackadar",
+    "Mike Scott",
+    "Mathieu Hubbard",
+    "Kevin Laine",
+    "Pete Gilbert"
+  ]
+}

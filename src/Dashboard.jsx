@@ -38,6 +38,7 @@ export default function Dashboard() {
   const [mode, setMode] = useState("mom");
   const [hState, setHState] = useState({});
   const [auditKey, setAuditKey] = useState(null);
+  const [copyStatus, setCopyStatus] = useState("");
 
   const monthOpts = genMonthOpts(hState);
   const quarterOpts = genQuarterOpts(hState);
@@ -59,6 +60,21 @@ export default function Dashboard() {
   useEffect(() => { if (["actuals", "forecast", "detail"].includes(tab) && !dataA) loadData(); }, [tab]);
   useEffect(() => { if (tab === "audit" && !auditData) fetchAuditData(); }, [tab]);
 
+  // Copy the current hierarchy as JSON so it can be committed to data/hierarchy.json
+  // (the git-stored, cross-machine baseline). See lib/drive.js.
+  const copyHierarchy = async () => {
+    if (!H) return;
+    const text = JSON.stringify(H, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("Copied. Paste it to Claude to commit.");
+    } catch {
+      setCopyStatus("Copy failed (see console)");
+      console.log("Hierarchy JSON:\n" + text);
+    }
+    setTimeout(() => setCopyStatus(""), 4000);
+  };
+
   const showControls = tab === "actuals" || tab === "forecast";
   const dotColor = status.type === "g" ? B.green : status.type === "a" ? B.amber : status.type === "r" ? B.red : B.lgray;
   const auditBadge = auditData ? (auditData.zeroRates.length + auditData.zeroRevSplits.length + auditData.nullSrc.length) : 0;
@@ -78,8 +94,9 @@ export default function Dashboard() {
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor }} />{status.msg}
           </span>
           {tab === "hierarchy" && <>
-            <span style={{ fontSize: 10, color: "#aaa" }}>{saveStatus}</span>
+            <span style={{ fontSize: 10, color: "#aaa" }}>{copyStatus || saveStatus}</span>
             <button onClick={syncSF} style={{ fontSize: 11, padding: "5px 12px", border: `0.5px solid ${B.lgray}`, borderRadius: 6, background: "transparent", cursor: "pointer", fontFamily: "'Open Sans',sans-serif", color: "#888" }}>↺ Sync SF</button>
+            <button onClick={copyHierarchy} style={{ fontSize: 11, padding: "5px 12px", border: `0.5px solid ${B.lgray}`, borderRadius: 6, background: "transparent", cursor: "pointer", fontFamily: "'Open Sans',sans-serif", color: "#888" }}>Copy JSON</button>
             <button onClick={saveHierarchy} style={{ fontSize: 11, padding: "5px 12px", background: B.teal, color: B.white, border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "'Open Sans',sans-serif" }}>Save</button>
           </>}
           {tab !== "hierarchy" && <button onClick={loadData} style={{ fontSize: 11, padding: "5px 12px", border: `0.5px solid ${B.lgray}`, borderRadius: 6, background: "transparent", cursor: "pointer", fontFamily: "'Open Sans',sans-serif", color: "#888" }}>↺ Refresh</button>}
