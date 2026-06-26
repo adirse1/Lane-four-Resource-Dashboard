@@ -12,6 +12,7 @@ import { useAudit } from "./hooks/useAudit.js";
 import { Spinner, AuditPanel, ControlsBar } from "./components/index.js";
 import HierarchyTab from "./tabs/HierarchyTab.jsx";
 import UtilizationTab from "./tabs/UtilizationTab.jsx";
+import ResourcePlannerTab from "./tabs/ResourcePlannerTab.jsx";
 import ActualsTab from "./tabs/ActualsTab.jsx";
 import ForecastTab from "./tabs/ForecastTab.jsx";
 import TimeDetailTab from "./tabs/TimeDetailTab.jsx";
@@ -21,6 +22,7 @@ import OptionsTab from "./tabs/OptionsTab.jsx";
 const TABS = [
   { id: "hierarchy", label: "Team hierarchy" },
   { id: "utilization", label: "Utilization" },
+  { id: "planner", label: "Resource planner" },
   { id: "actuals", label: "Actuals" },
   { id: "forecast", label: "Forecast" },
   { id: "detail", label: "Time detail" },
@@ -142,6 +144,7 @@ export default function Dashboard() {
       {/* Tab content */}
       {tab === "hierarchy" && <HierarchyTab H={H} setH={setH} loading={hierLoading} loadMsg={hierLoadMsg} />}
       {tab === "utilization" && <UtilizationTab H={H} hState={hState} />}
+      {tab === "planner" && <ResourcePlannerTab H={H} hState={hState} />}
       {!loading && tab === "actuals" && <ActualsTab periodA={periodA} periodB={periodB} dataA={dataA} dataB={dataB} setAuditKey={setAuditKey} />}
       {!loading && tab === "forecast" && <ForecastTab periodA={periodA} periodB={periodB} dataA={dataA} dataB={dataB} vacData={vacData} hState={hState} setAuditKey={setAuditKey} sendPrompt={sendPrompt} />}
       {!loading && tab === "detail" && <TimeDetailTab periodA={periodA} detailData={detailData} />}

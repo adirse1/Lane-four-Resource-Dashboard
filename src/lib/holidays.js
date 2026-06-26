@@ -111,6 +111,19 @@ export function calcWDElapsed(year, month, hols) {
   return c;
 }
 
+// Working days (Mon-Fri minus holidays) in the 7-day week starting at weekStart
+// (a Monday). holDates is a Set of "YYYY-MM-DD" strings of enabled holidays. Used
+// by the resource planner to size weekly capacity without hardcoding holidays.
+export function calcWDWeek(weekStart, holDates) {
+  let c = 0;
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i);
+    const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (!holDates.has(k)) c++;
+  }
+  return c;
+}
+
 export function calcQWD(year, qNum, hState) {
   const FISCAL_Q = {
     1: [{ y: year, m: 7 }, { y: year, m: 8 }, { y: year, m: 9 }],

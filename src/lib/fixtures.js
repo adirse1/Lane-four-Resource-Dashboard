@@ -75,6 +75,20 @@ export function sfFixture(soql) {
     if (soql.includes("pse__Scheduled_Hours__c = 0")) {
       return { records: [{ Id: "a02", Name: "ASG-1042", resource: "Omar Farah", proj: "Josh Project 5", grp: "Aldus Behan", scheduledHours: 0, startDate: "2026-04-01", endDate: "2026-06-30" }] };
     }
+    // Resource planner: assignment -> schedule weekday pattern. One full-time
+    // schedule per in-scope person, plus a second concurrent one for Sarah Kim so
+    // the over-capacity coloring is exercised.
+    if (soql.includes("pse__Schedule__r.pse__Monday_Hours__c")) {
+      const fullWeek = { pse__Start_Date__c: "2026-01-01", pse__End_Date__c: "2026-12-31", pse__Monday_Hours__c: 8, pse__Tuesday_Hours__c: 8, pse__Wednesday_Hours__c: 8, pse__Thursday_Hours__c: 8, pse__Friday_Hours__c: 8, pse__Saturday_Hours__c: 0, pse__Sunday_Hours__c: 0 };
+      const recs = PEOPLE.filter((p) => p.grp !== "Unscoped Group").map((p, i) => ({
+        pse__Resource__r: { Name: p.name },
+        pse__Project__r: { Name: `${p.pm.split(" ")[0]} Project ${i + 1}`, pse__Group__r: { Name: p.grp }, pse__Project_Manager__r: { Name: p.pm } },
+        pse__Schedule__r: fullWeek,
+        Id: `asg${i}`,
+      }));
+      recs.push({ pse__Resource__r: { Name: "Sarah Kim" }, pse__Project__r: { Name: "Michelle Project 99", pse__Group__r: { Name: "Aldus Behan" }, pse__Project_Manager__r: { Name: "Michelle Clark" } }, pse__Schedule__r: fullWeek, Id: "asg-extra" });
+      return { records: recs };
+    }
     return { records: [] };
   }
 
