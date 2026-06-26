@@ -31,15 +31,42 @@ export const VACATION_PROJECT = "Internal - Vacation Time";
 export const hierarchyAssignments = (minEndDate = "2026-04-01") =>
   `SELECT pse__Resource__r.Name resource, pse__Project__r.pse__Group__r.Name grp, pse__Project__r.pse__Project_Manager__r.Name pm, COUNT(Id) cnt FROM pse__Assignment__c WHERE pse__Is_Billable__c=true AND pse__Status__c='Scheduled' AND pse__Project__r.Project_Source__c IN ${SRC} AND pse__End_Date__c>=${minEndDate} GROUP BY pse__Resource__r.Name,pse__Project__r.pse__Group__r.Name,pse__Project__r.pse__Project_Manager__r.Name ORDER BY pse__Project__r.pse__Group__r.Name,pse__Resource__r.Name`;
 
+// ── Resource planner (pse__Assignment__c -> pse__Schedule__c) ───────────────────
+// Forward-looking weekly capacity. The assignment is the parent record; the real
+// per-day/per-week committed hours live on the related Schedule (pse__Schedule__c)
+// as a weekday pattern (Monday_Hours .. Sunday_Hours) over its own Start/End dates.
+// pse__Scheduled_Hours__c on the assignment is a span TOTAL (multi-year spans) and
+// is NOT used. Scoped by resource (the person), so a person's commitments on any
+// group's project count toward their capacity. Non-aggregate, so no field aliases
+// (Salesforce rejects them); the hook flattens the relationship objects and buckets
+// the weekday hours into Monday-weeks.
+export const resourcePlannerAssignments = (windowStart, windowEnd, resources) =>
+  `SELECT pse__Resource__r.Name, pse__Project__r.Name, pse__Project__r.pse__Group__r.Name, pse__Project__r.pse__Project_Manager__r.Name, pse__Schedule__r.pse__Start_Date__c, pse__Schedule__r.pse__End_Date__c, pse__Schedule__r.pse__Monday_Hours__c, pse__Schedule__r.pse__Tuesday_Hours__c, pse__Schedule__r.pse__Wednesday_Hours__c, pse__Schedule__r.pse__Thursday_Hours__c, pse__Schedule__r.pse__Friday_Hours__c, pse__Schedule__r.pse__Saturday_Hours__c, pse__Schedule__r.pse__Sunday_Hours__c, Id FROM pse__Assignment__c WHERE pse__Status__c='Scheduled' AND pse__Is_Billable__c=true AND pse__Schedule__c!=null AND pse__Resource__r.Name IN (${(resources || []).map((r) => `'${String(r).replace(/'/g, "\\'")}'`).join(",")}) AND pse__Schedule__r.pse__End_Date__c>=${windowStart} AND pse__Schedule__r.pse__Start_Date__c<=${windowEnd} ORDER BY pse__Resource__r.Name, pse__Schedule__r.pse__Start_Date__c`;
+
 // ── Utilization (pse__Timecard__c), by resource for a single month ──────────────
+// SCOPE NOTE: utilization intentionally does NOT use the managed-services
+// Project_Source__c filter that the revenue tabs (Actuals/Forecast/RPD) use.
+// Utilization answers "is this person busy?", so it counts all approved billable
+// hours on any real client project (excluding Internal/vacation), regardless of
+// the project's source tag or owning group. Project_Source__c is a formula that
+// is null on many in-scope projects, which falsely zeroed people who did billable
+// work on cross-group or untagged projects. Keyed off the project, not the source.
 export const utilizationBillable = (ms, me) =>
-  `SELECT pse__Resource__r.Name resource,pse__Project__r.pse__Group__r.Name grp,pse__Project__r.pse__Project_Manager__r.Name pm,SUM(pse__Total_Hours__c) hours,SUM(Total_Billable_Amount_Formula__c) revenue FROM pse__Timecard__c WHERE pse__Approved__c=true AND pse__Billable__c=true AND Project_Source__c IN ${SRC} AND pse__Start_Date__c>=${ms} AND pse__Start_Date__c<=${me} GROUP BY pse__Resource__r.Name,pse__Project__r.pse__Group__r.Name,pse__Project__r.pse__Project_Manager__r.Name`;
+  `SELECT pse__Resource__r.Name resource,pse__Project__r.pse__Group__r.Name grp,pse__Project__r.pse__Project_Manager__r.Name pm,SUM(pse__Total_Hours__c) hours,SUM(Total_Billable_Amount_Formula__c) revenue FROM pse__Timecard__c WHERE pse__Approved__c=true AND pse__Billable__c=true AND (NOT pse__Project__r.Name LIKE 'Internal%') AND pse__Start_Date__c>=${ms} AND pse__Start_Date__c<=${me} GROUP BY pse__Resource__r.Name,pse__Project__r.pse__Group__r.Name,pse__Project__r.pse__Project_Manager__r.Name`;
 
 export const utilizationVacation = (ms, me) =>
   `SELECT pse__Resource__r.Name resource,SUM(pse__Total_Hours__c) hours FROM pse__Timecard__c WHERE pse__Approved__c=true AND pse__Project__r.Name='${VACATION_PROJECT}' AND pse__Start_Date__c>=${ms} AND pse__Start_Date__c<=${me} GROUP BY pse__Resource__r.Name`;
 
 export const utilizationCredited = (ms, me) =>
-  `SELECT pse__Resource__r.Name resource,SUM(pse__Total_Hours__c) hours FROM pse__Timecard__c WHERE pse__Approved__c=true AND pse__Time_Credited__c=true AND Project_Source__c IN ${SRC} AND pse__Start_Date__c>=${ms} AND pse__Start_Date__c<=${me} GROUP BY pse__Resource__r.Name`;
+  `SELECT pse__Resource__r.Name resource,SUM(pse__Total_Hours__c) hours FROM pse__Timecard__c WHERE pse__Approved__c=true AND pse__Time_Credited__c=true AND (NOT pse__Project__r.Name LIKE 'Internal%') AND pse__Start_Date__c>=${ms} AND pse__Start_Date__c<=${me} GROUP BY pse__Resource__r.Name`;
+
+// Per-person audit drill-down: every approved timecard split for one resource in
+// the month, so a utilization number can be reconciled line-by-line against
+// Salesforce. Non-aggregate (no field aliases allowed alongside relationship
+// fields); the hook reads the nested relationship objects. Id is the timecard
+// split record so rows can be found directly in SF reports.
+export const utilizationPersonDetail = (resource, ms, me) =>
+  `SELECT pse__Project__r.Name, pse__Project__r.pse__Account__r.Name, pse__Project__r.pse__Group__r.Name, pse__Project__r.pse__Project_Manager__r.Name, Project_Source__c, pse__Billable__c, pse__Time_Credited__c, pse__Total_Hours__c, Total_Billable_Amount_Formula__c, pse__Start_Date__c, Id FROM pse__Timecard__c WHERE pse__Approved__c=true AND pse__Resource__r.Name='${resource.replace(/'/g, "\\'")}' AND pse__Start_Date__c>=${ms} AND pse__Start_Date__c<=${me} ORDER BY pse__Project__r.Name, pse__Start_Date__c LIMIT 1000`;
 
 // ── Period actuals (pse__Timecard__c), for Actuals / Forecast / Time detail ──────
 export const periodByPM = (start, end) =>
@@ -58,8 +85,14 @@ export const periodCredited = (start, end) =>
 export const periodVacation = (start, end) =>
   `SELECT pse__Resource__r.Name resource, pse__Project__r.pse__Group__r.Name grp, pse__Project__r.pse__Project_Manager__r.Name pm, SUM(pse__Total_Hours__c) hours FROM pse__Timecard__c WHERE pse__Approved__c = true AND pse__Project__r.Name = '${VACATION_PROJECT}' AND pse__Start_Date__c >= ${start} AND pse__Start_Date__c <= ${end} GROUP BY pse__Resource__r.Name, pse__Project__r.pse__Group__r.Name, pse__Project__r.pse__Project_Manager__r.Name`;
 
+// NOTE: diverges from the original artifact query. The original aliased every
+// selected field (resource, proj, hours, ...), but Salesforce rejects field
+// aliasing on a non-aggregate query (MALFORMED_QUERY: "only aggregate expressions
+// use field aliasing") — so it could never run live. Aliases removed; the
+// consuming hook (usePeriodData.fetchDetail) flattens the relationship objects
+// back to the friendly keys the Time detail tab expects. Same fields, same scope.
 export const periodDetail = (start, end) =>
-  `SELECT pse__Resource__r.Name resource, pse__Project__r.Name proj, pse__Project__r.pse__Account__r.Name acct, pse__Project__r.pse__Group__r.Name grp, pse__Project__r.pse__Project_Manager__r.Name pm, pse__Total_Hours__c hours, Total_Billable_Amount_Formula__c revenue, pse__Billable__c billable, pse__Time_Credited__c credited, pse__Start_Date__c startDate, Project_Source__c src, Id recordId FROM pse__Timecard__c WHERE pse__Approved__c = true AND pse__Start_Date__c >= ${start} AND pse__Start_Date__c <= ${end} AND (Project_Source__c IN ${SRC} OR pse__Project__r.Name = '${VACATION_PROJECT}') ORDER BY pse__Start_Date__c DESC LIMIT 200`;
+  `SELECT pse__Resource__r.Name, pse__Project__r.Name, pse__Project__r.pse__Account__r.Name, pse__Project__r.pse__Group__r.Name, pse__Project__r.pse__Project_Manager__r.Name, pse__Total_Hours__c, Total_Billable_Amount_Formula__c, pse__Billable__c, pse__Time_Credited__c, pse__Start_Date__c, Project_Source__c, Id FROM pse__Timecard__c WHERE pse__Approved__c = true AND pse__Start_Date__c >= ${start} AND pse__Start_Date__c <= ${end} AND (Project_Source__c IN ${SRC} OR pse__Project__r.Name = '${VACATION_PROJECT}') ORDER BY pse__Start_Date__c DESC LIMIT 200`;
 
 // ── Data audit (five data-quality checks) ───────────────────────────────────────
 export const auditZeroRates = () =>

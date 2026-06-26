@@ -4,18 +4,30 @@
 import { useState, useEffect } from "react";
 import { B, MONTHS } from "../constants/brand.js";
 import { ac, ini, fmtK } from "../lib/format.js";
-import { Spinner } from "../components/index.js";
+import { Spinner, UtilPersonPanel } from "../components/index.js";
 import { useUtilization } from "../hooks/useUtilization.js";
 
 export default function UtilizationTab({ H, hState }) {
   const today = new Date();
-  const { uData, loading, load } = useUtilization(H, hState);
+  const { uData, loading, load, loadDetail } = useUtilization(H, hState);
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
-  const [view, setView] = useState("director");
+  const [view, setView] = useState("pod");
   const [sort, setSort] = useState("name");
   const [sortDir, setSortDir] = useState(1);
   const [expanded, setExpanded] = useState({});
+  // Audit drill-down: selected person + their fetched timecard rows.
+  const [sel, setSel] = useState(null);
+  const [selRows, setSelRows] = useState(null);
+  const [selLoading, setSelLoading] = useState(false);
+
+  const openPerson = (p) => {
+    setSel(p); setSelRows(null); setSelLoading(true);
+    loadDetail(p.name, year, month)
+      .then((rows) => setSelRows(rows))
+      .catch(() => setSelRows([]))
+      .finally(() => setSelLoading(false));
+  };
 
   const ucol = (p) => p >= 90 ? { bg: B.greenBg, tx: B.greenTx } : p >= 70 ? { bg: B.amberBg, tx: B.amberTx } : { bg: B.redBg, tx: B.redTx };
 
@@ -43,7 +55,7 @@ export default function UtilizationTab({ H, hState }) {
   const { people, wd, wde, cap, m, y } = uData;
   const lbl = MONTHS[m - 1] + " " + y;
   const tB = people.reduce((s, p) => s + p.b, 0), tC = people.reduce((s, p) => s + p.cr, 0), tV = people.reduce((s, p) => s + p.v, 0), tR = people.reduce((s, p) => s + p.rev, 0);
-  const tCap = people.length * cap, tU = tCap > 0 ? ((tB + tC) / tCap * 100) : 0;
+  const tCap = people.length * cap, tU = tCap > 0 ? ((tB + tC + tV) / tCap * 100) : 0;
   const tu = ucol(tU);
 
   const bD = {}, bP = {};
@@ -73,7 +85,7 @@ export default function UtilizationTab({ H, hState }) {
   const PersonRow = ({ p, indent }) => {
     const c = ucol(p.util), a = ac(p.name);
     return (
-      <div style={{ display: "grid", gridTemplateColumns: cols, padding: `6px 12px 6px ${indent ? "26px" : "12px"}`, borderBottom: `0.5px solid ${B.lgray}`, alignItems: "center" }}>
+      <div onClick={() => openPerson(p)} title="View timecard detail" style={{ display: "grid", gridTemplateColumns: cols, padding: `6px 12px 6px ${indent ? "26px" : "12px"}`, borderBottom: `0.5px solid ${B.lgray}`, alignItems: "center", cursor: "pointer" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
           <div style={{ width: 18, height: 18, borderRadius: "50%", background: a.bg, color: a.tx, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, flexShrink: 0 }}>{ini(p.name)}</div>
           <span style={{ fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontFamily: "'Open Sans',sans-serif" }}>{p.name.split(" ")[0]} {p.name.split(" ").slice(-1)[0]}</span>
@@ -88,13 +100,17 @@ export default function UtilizationTab({ H, hState }) {
     );
   };
 
-  const GroupRow = ({ name, d, util, ppl2, gkey }) => {
+  // Collapsible rollup row. Renders its `children` (people, or nested pod rows)
+  // when expanded. level 0 = director, level 1 = pod. defaultOpen lets the pod
+  // view show pods immediately under each director.
+  const GroupRow = ({ name, d, util, gkey, level = 0, defaultOpen = false, children }) => {
     const c = ucol(util), dCap = d.n * cap;
-    const isExp = expanded[gkey];
+    const isExp = expanded[gkey] ?? defaultOpen;
+    const padL = 12 + level * 16;
     return (
       <div style={{ borderBottom: `0.5px solid ${B.lgray}` }}>
-        <div onClick={() => setExpanded((e) => ({ ...e, [gkey]: !e[gkey] }))} style={{ display: "grid", gridTemplateColumns: cols, padding: "8px 12px", background: B.offwhite, cursor: "pointer", alignItems: "center" }}>
-          <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Poppins',sans-serif", display: "flex", alignItems: "center", gap: 5 }}>
+        <div onClick={() => setExpanded((e) => ({ ...e, [gkey]: !(e[gkey] ?? defaultOpen) }))} style={{ display: "grid", gridTemplateColumns: cols, padding: `8px 12px 8px ${padL}px`, background: level === 0 ? B.offwhite : "#F0FAFA", cursor: "pointer", alignItems: "center" }}>
+          <div style={{ fontSize: level === 0 ? 12 : 11, fontWeight: 700, fontFamily: "'Poppins',sans-serif", display: "flex", alignItems: "center", gap: 5, color: level === 0 ? B.black : B.teal }}>
             <span style={{ fontSize: 10, color: "#bbb", transform: isExp ? "rotate(90deg)" : "none", transition: "transform .15s", display: "inline-block" }}>▶</span>
             {name.trim()}
             <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 5, background: B.lgray, color: "#888" }}>{d.n}</span>
@@ -106,26 +122,33 @@ export default function UtilizationTab({ H, hState }) {
           <div style={{ textAlign: "right", fontSize: 11, color: d.v > 0 ? B.amber : "#ccc" }}>{Math.round(d.v) || "—"}</div>
           <div style={{ textAlign: "right", fontSize: 11 }}>{fmtK(d.rev)}</div>
         </div>
-        {isExp && ppl2.map((p) => <PersonRow key={p.name} p={p} indent />)}
+        {isExp && children}
       </div>
     );
   };
 
+  const dirs = ["Aldus Behan", "Meghan Saunders", "Unassigned"].filter((dn) => bD[dn]);
+  const utilOf = (g) => { const gc = g.n * cap; return gc > 0 ? ((g.b + g.cr + g.v) / gc * 100) : 0; };
+
   let tableRows;
   if (view === "director") {
-    tableRows = ["Aldus Behan", "Meghan Saunders", "Unassigned"].filter((dn) => bD[dn]).map((dn) => {
-      const d = bD[dn], dc = d.n * cap, du = dc > 0 ? ((d.b + d.cr) / dc * 100) : 0;
-      return <GroupRow key={dn} name={dn} d={d} util={du} ppl2={sorted.filter((p) => (p.dirName || "Unassigned") === dn)} gkey={dn} />;
-    });
+    tableRows = dirs.map((dn) => (
+      <GroupRow key={dn} name={dn} d={bD[dn]} util={utilOf(bD[dn])} gkey={dn}>
+        {sorted.filter((p) => (p.dirName || "Unassigned") === dn).map((p) => <PersonRow key={p.name} p={p} indent />)}
+      </GroupRow>
+    ));
   } else if (view === "pod") {
-    tableRows = ["Aldus Behan", "Meghan Saunders", "Unassigned"].filter((dn) => bD[dn]).flatMap((dn) => {
-      const header = <div key={"hdr-" + dn} style={{ background: "#F0FAFA", borderBottom: `0.5px solid ${B.lgray}`, borderTop: `0.5px solid ${B.lgray}`, padding: "5px 12px", fontSize: 10, fontWeight: 700, fontFamily: "'Poppins',sans-serif", color: B.teal }}>{dn.split(" ")[0]}</div>;
-      const pods = Object.entries(bP).filter(([k]) => k.startsWith(dn + ":::")).map(([k, pod]) => {
-        const pc = pod.n * cap, pu = pc > 0 ? ((pod.b + pod.cr) / pc * 100) : 0;
-        return <GroupRow key={k} name={"  " + pod.name} d={pod} util={pu} ppl2={sorted.filter((p) => (p.dirName || "Unassigned") === dn && (p.podName || "Direct") === pod.name)} gkey={k} />;
-      });
-      return [header, ...pods];
-    });
+    // Director rollup → pod rollups → people. Directors open by default so every
+    // pod's utilization is visible at a glance; each pod expands to its people.
+    tableRows = dirs.map((dn) => (
+      <GroupRow key={dn} name={dn} d={bD[dn]} util={utilOf(bD[dn])} gkey={dn} defaultOpen>
+        {Object.entries(bP).filter(([k]) => k.startsWith(dn + ":::")).map(([k, pod]) => (
+          <GroupRow key={k} name={pod.name} d={pod} util={utilOf(pod)} gkey={k} level={1}>
+            {sorted.filter((p) => (p.dirName || "Unassigned") === dn && (p.podName || "Direct") === pod.name).map((p) => <PersonRow key={p.name} p={p} indent />)}
+          </GroupRow>
+        ))}
+      </GroupRow>
+    ));
   } else {
     tableRows = sorted.map((p) => <PersonRow key={p.name} p={p} indent={false} />);
   }
@@ -192,8 +215,10 @@ export default function UtilizationTab({ H, hState }) {
       </div>
 
       <div style={{ marginTop: 8, fontSize: 10, color: "#aaa", fontFamily: "'Open Sans',sans-serif" }}>
-        Capacity = {wde} elapsed working days × 8 hrs · CA holidays applied · Approved timecards only
+        Capacity = {wde} elapsed working days × 8 hrs · CA holidays applied · Approved timecards only · Click a person to audit
       </div>
+
+      {sel && <UtilPersonPanel person={sel} rows={selRows} lbl={lbl} cap={cap} loading={selLoading} onClose={() => setSel(null)} />}
     </div>
   );
 }
