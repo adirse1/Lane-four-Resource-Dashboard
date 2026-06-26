@@ -113,12 +113,12 @@ export default function UtilizationTab({ H, hState }) {
 
   let tableRows;
   if (view === "director") {
-    tableRows = ["Aldus Behan", "Meghan Saunders", "Tatiane Sensini", "Unassigned"].filter((dn) => bD[dn]).map((dn) => {
+    tableRows = ["Aldus Behan", "Meghan Saunders", "Unassigned"].filter((dn) => bD[dn]).map((dn) => {
       const d = bD[dn], dc = d.n * cap, du = dc > 0 ? ((d.b + d.cr) / dc * 100) : 0;
       return <GroupRow key={dn} name={dn} d={d} util={du} ppl2={sorted.filter((p) => (p.dirName || "Unassigned") === dn)} gkey={dn} />;
     });
   } else if (view === "pod") {
-    tableRows = ["Aldus Behan", "Meghan Saunders", "Tatiane Sensini", "Unassigned"].filter((dn) => bD[dn]).flatMap((dn) => {
+    tableRows = ["Aldus Behan", "Meghan Saunders", "Unassigned"].filter((dn) => bD[dn]).flatMap((dn) => {
       const header = <div key={"hdr-" + dn} style={{ background: "#F0FAFA", borderBottom: `0.5px solid ${B.lgray}`, borderTop: `0.5px solid ${B.lgray}`, padding: "5px 12px", fontSize: 10, fontWeight: 700, fontFamily: "'Poppins',sans-serif", color: B.teal }}>{dn.split(" ")[0]}</div>;
       const pods = Object.entries(bP).filter(([k]) => k.startsWith(dn + ":::")).map(([k, pod]) => {
         const pc = pod.n * cap, pu = pc > 0 ? ((pod.b + pod.cr) / pc * 100) : 0;

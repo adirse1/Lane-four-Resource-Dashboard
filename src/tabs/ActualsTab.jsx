@@ -1,7 +1,6 @@
 // Actuals: RPD comparison across two periods, drill All teams > Director > Pod > Account.
 import { useState } from "react";
 import { B } from "../constants/brand.js";
-import { TATI_GROUPS } from "../constants/teams.js";
 import { fmt, fmtK, fmtD, fmtH } from "../lib/format.js";
 import { groupTotal } from "../lib/period.js";
 import { Tag, HelpIcon, Spinner } from "../components/index.js";
@@ -20,16 +19,15 @@ export default function ActualsTab({ periodA, periodB, dataA, dataB, setAuditKey
 
   if (!dirName) {
     colLabel = "Team";
-    const groups = ["Aldus Behan", "Meghan Saunders", "Tatiane Sensini"];
+    const groups = ["Aldus Behan", "Meghan Saunders"];
     rows = groups.map((g) => {
-      const isTati = TATI_GROUPS.includes(g) || g === "Tatiane Sensini";
       const aG = groupTotal(dataA?.pmMap, [g]);
       const bG = groupTotal(dataB?.pmMap, [g]);
       return {
         id: g, label: g.split(" ")[0], fullLabel: g,
         revA: aG.rev, revB: bG.rev, hrsA: aG.hrs,
         rpdA: aG.rev / wdA, rpdB: bG.rev / wdB,
-        creditedHrs: 0, isTati,
+        creditedHrs: 0,
         drillable: true, drillType: "director",
       };
     });
@@ -63,8 +61,8 @@ export default function ActualsTab({ periodA, periodB, dataA, dataB, setAuditKey
 
   let headlineRevA = 0, headlineRevB = 0, headlineHrsA = 0;
   if (!dirName) {
-    const aT = groupTotal(dataA?.pmMap, ["Aldus Behan", "Meghan Saunders", "Tatiane Sensini", "Lane Four"]);
-    const bT = groupTotal(dataB?.pmMap, ["Aldus Behan", "Meghan Saunders", "Tatiane Sensini", "Lane Four"]);
+    const aT = groupTotal(dataA?.pmMap, ["Aldus Behan", "Meghan Saunders", "Lane Four"]);
+    const bT = groupTotal(dataB?.pmMap, ["Aldus Behan", "Meghan Saunders", "Lane Four"]);
     headlineRevA = aT.rev; headlineRevB = bT.rev; headlineHrsA = aT.hrs;
   } else if (!podName) {
     const aG = groupTotal(dataA?.pmMap, [dirName]);
@@ -157,7 +155,6 @@ export default function ActualsTab({ periodA, periodB, dataA, dataB, setAuditKey
                   {row.label}
                   {row.drillable && <span style={{ fontSize: 10, color: "#ccc" }}>›</span>}
                   {row.credited && <Tag color={B.purpleTx} bg={B.purpleBg}>credited</Tag>}
-                  {row.isTati && <Tag color="#888" bg={B.lgray}>global</Tag>}
                 </div>
                 <div style={{ fontSize: 12, textAlign: "right" }}>{fmtK(row.revA)}</div>
                 <div style={{ fontSize: 12, textAlign: "right", color: "#aaa" }}>{fmtK(row.revB)}</div>

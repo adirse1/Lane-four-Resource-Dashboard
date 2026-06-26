@@ -16,8 +16,8 @@ const PEOPLE = [
   { name: "Mia Wong", grp: "Meg Diplock", pm: "Vesna Sorgic", hours: 138, revenue: 27600 },
   { name: "Leo Garcia", grp: "Meghan Saunders", pm: "Brandon Wilson", hours: 112, revenue: 19800 },
   { name: "Anna Schmidt", grp: "Meghan Saunders", pm: "Malcolm McMullin", hours: 150, revenue: 31900 },
-  { name: "Paulo Costa", grp: "Tatiane Sensini", pm: "Tatiane Sensini", hours: 154, revenue: 32500 },
-  { name: "Julia Rocha", grp: "Tatiane Sensini", pm: "Tatiane Sensini", hours: 126, revenue: 24100 },
+  { name: "Paulo Costa", grp: "Meghan Saunders", pm: "Brandon Wilson", hours: 154, revenue: 32500 },
+  { name: "Julia Rocha", grp: "Aldus Behan", pm: "Julie Holm", hours: 126, revenue: 24100 },
   { name: "Chris Day", grp: "Unscoped Group", pm: "Unknown", hours: 88, revenue: 12200 },
 ];
 

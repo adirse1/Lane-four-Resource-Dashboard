@@ -25,7 +25,7 @@ export default function ForecastTab({
   const lA = periodA?.label || "Current";
   const wdEl = periodA?.month ? calcWDElapsed(periodA.year, periodA.month, getEnabledHols(periodA.year, "CA", hState)) : 0;
   const vacTotal = (vacData || []).reduce((s, r) => s + (r.hours || 0), 0);
-  const revToDate = dataA ? groupTotal(dataA.pmMap, ["Aldus Behan", "Meghan Saunders", "Tatiane Sensini", "Lane Four"]).rev : 0;
+  const revToDate = dataA ? groupTotal(dataA.pmMap, ["Aldus Behan", "Meghan Saunders", "Lane Four"]).rev : 0;
   const rpdToDate = wdEl > 0 ? revToDate / wdEl : 0;
 
   return (

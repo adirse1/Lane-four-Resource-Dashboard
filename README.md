@@ -106,7 +106,12 @@ Forecast/scheduling from **`pse__Assignment__c`**: scheduled hours
 
 - **Aldus Behan** — SF groups: Aldus Behan, Lane Four, Mike Scott. Pods: Michelle Clark, Lindsay Chown, Julie Holm, Josh Wright.
 - **Meghan Saunders** — SF groups: Meghan Saunders, Meg Diplock. Pods: Will Shorthouse, Vesna Sorgic, Brandon Wilson, Malcolm McMullin.
-- **Tatiane Sensini** — SF group: Tatiane Sensini. No pods (Fiix + MLG, global total only).
+
+Scope: the dashboard covers the Aldus and Meghan directorates only. Tatiane Sensini's
+group (Fiix + MLG) is intentionally excluded from every tab and from the all-teams
+totals. Her timecards still exist in Salesforce and are still returned by the queries,
+but the UI sums only the groups listed above, so the all-teams headline reflects this
+team, not the whole company.
 
 Pod = the Project Manager field on the timecard
 (`pse__Project__r.pse__Project_Manager__r.Name`). More reliable than Practice for Meghan's team.
