@@ -48,3 +48,65 @@ export async function saveHierarchy(h) {
   if (!r.ok) throw new Error("Hierarchy save failed (" + r.status + ")");
   return true;
 }
+
+// ── Forecast scenarios (resource planner overlay) ────────────────────────────────
+// Persisted per runtime mode, same choke-point as the hierarchy:
+//   proxy   server/data/forecast-scenarios/[name].json via the local proxy
+//   oauth   this viewer's browser localStorage (per-viewer)
+//   fixtures browser localStorage too, so dev can save/load without a proxy
+// Only the planner OVERLAY is written (hypothetical people/projects, overlay hours,
+// pod reassignments) — committed Salesforce assignment data is never saved.
+const SCEN_PREFIX = "lf_scenario_";
+function safeScenarioName(name) {
+  const s = String(name || "").replace(/[^a-zA-Z0-9 _-]/g, "").trim();
+  if (!s) throw new Error("Invalid scenario name (use letters, numbers, spaces, - or _)");
+  return s;
+}
+
+export async function listScenarios() {
+  if (MODE === "proxy") {
+    const r = await fetch("/api/scenarios");
+    if (!r.ok) throw new Error("Could not list scenarios (" + r.status + ")");
+    const j = await r.json();
+    return Array.isArray(j?.scenarios) ? j.scenarios : [];
+  }
+  return Object.keys(localStorage).filter((k) => k.startsWith(SCEN_PREFIX)).map((k) => k.slice(SCEN_PREFIX.length)).sort();
+}
+
+export async function saveScenario(name, scenario) {
+  const nm = safeScenarioName(name);
+  if (MODE === "proxy") {
+    const r = await fetch("/api/scenario", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: nm, scenario }),
+    });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => "");
+      throw new Error("Drive save failed (" + r.status + (detail ? ": " + detail : "") + ")");
+    }
+    // The doc warns the old hierarchy save read ANY non-error as success. Here we
+    // require the proxy to actually confirm the write (ok:true) before reporting
+    // success; a 200 without confirmation is treated as a failure.
+    const j = await r.json().catch(() => null);
+    if (!j || j.ok !== true) throw new Error("Drive did not confirm the save");
+    return j;
+  }
+  try { localStorage.setItem(SCEN_PREFIX + nm, JSON.stringify(scenario)); }
+  catch (e) { throw new Error("Local save failed: " + e.message); }
+  return { ok: true, name: nm };
+}
+
+export async function loadScenario(name) {
+  const nm = safeScenarioName(name);
+  if (MODE === "proxy") {
+    const r = await fetch("/api/scenario?name=" + encodeURIComponent(nm));
+    if (!r.ok) throw new Error("Could not load scenario (" + r.status + ")");
+    const j = await r.json();
+    if (!j || j.error) throw new Error(j?.error || "Scenario not found");
+    return j;
+  }
+  const v = localStorage.getItem(SCEN_PREFIX + nm);
+  if (!v) throw new Error("Scenario not found");
+  return JSON.parse(v);
+}

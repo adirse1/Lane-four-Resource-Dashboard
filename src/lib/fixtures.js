@@ -75,18 +75,29 @@ export function sfFixture(soql) {
     if (soql.includes("pse__Scheduled_Hours__c = 0")) {
       return { records: [{ Id: "a02", Name: "ASG-1042", resource: "Omar Farah", proj: "Josh Project 5", grp: "Aldus Behan", scheduledHours: 0, startDate: "2026-04-01", endDate: "2026-06-30" }] };
     }
-    // Resource planner: assignment -> schedule weekday pattern. One full-time
-    // schedule per in-scope person, plus a second concurrent one for Sarah Kim so
-    // the over-capacity coloring is exercised.
-    if (soql.includes("pse__Schedule__r.pse__Monday_Hours__c")) {
-      const fullWeek = { pse__Start_Date__c: "2026-01-01", pse__End_Date__c: "2026-12-31", pse__Monday_Hours__c: 8, pse__Tuesday_Hours__c: 8, pse__Wednesday_Hours__c: 8, pse__Thursday_Hours__c: 8, pse__Friday_Hours__c: 8, pse__Saturday_Hours__c: 0, pse__Sunday_Hours__c: 0 };
-      const recs = PEOPLE.filter((p) => p.grp !== "Unscoped Group").map((p, i) => ({
+    // Resource planner: assignments with a span total (pse__Scheduled_Hours__c) the
+    // hook distributes across the span. Two projects per in-scope person (year-long
+    // spans -> ~20h and ~12h per week), plus a third for Sarah Kim to push her over.
+    if (soql.includes("pse__Resource__r.Name IN (")) {
+      // Forecast variant drops the billable-only filter and selects the flag.
+      const incNonBill = !soql.includes("pse__Is_Billable__c=true");
+      const span = { pse__Start_Date__c: "2026-01-01", pse__End_Date__c: "2026-12-31" }; // ~260 working days
+      const mk = (p, i, sched, suffix, billable = true, projName) => ({
         pse__Resource__r: { Name: p.name },
-        pse__Project__r: { Name: `${p.pm.split(" ")[0]} Project ${i + 1}`, pse__Group__r: { Name: p.grp }, pse__Project_Manager__r: { Name: p.pm } },
-        pse__Schedule__r: fullWeek,
-        Id: `asg${i}`,
-      }));
-      recs.push({ pse__Resource__r: { Name: "Sarah Kim" }, pse__Project__r: { Name: "Michelle Project 99", pse__Group__r: { Name: "Aldus Behan" }, pse__Project_Manager__r: { Name: "Michelle Clark" } }, pse__Schedule__r: fullWeek, Id: "asg-extra" });
+        pse__Project__r: { Name: projName || `${p.pm.split(" ")[0]} ${suffix}`, pse__Group__r: { Name: p.grp }, pse__Project_Manager__r: { Name: p.pm } },
+        ...span, pse__Scheduled_Hours__c: sched, Id: `asg${i}${suffix[0]}`, pse__Is_Billable__c: billable,
+      });
+      const inScope = PEOPLE.filter((p) => p.grp !== "Unscoped Group");
+      const recs = inScope.flatMap((p, i) => [mk(p, i, 1040, "Retainer"), mk(p, i, 624, "Project")]);
+      recs.push({ pse__Resource__r: { Name: "Sarah Kim" }, pse__Project__r: { Name: "Michelle Overflow", pse__Group__r: { Name: "Aldus Behan" }, pse__Project_Manager__r: { Name: "Michelle Clark" } }, ...span, pse__Scheduled_Hours__c: 1040, Id: "asg-extra", pse__Is_Billable__c: true });
+      // Non-billable + future vacation, so the forecast segments are non-empty in
+      // fixtures mode (vacation = the VACATION_PROJECT, a non-billable project).
+      if (incNonBill) {
+        inScope.forEach((p, i) => {
+          recs.push(mk(p, i, 130, "Vacation", false, "Internal - Vacation Time"));
+          recs.push(mk(p, i, 210, "AdminTime", false, "Internal - Admin Time"));
+        });
+      }
       return { records: recs };
     }
     return { records: [] };
@@ -99,6 +110,30 @@ export function sfFixture(soql) {
 
   // pse__Timecard__c queries
   if (soql.includes("FROM pse__Timecard__c")) {
+    // Report builder (buildTimecardReport): scoped by PM name, returns nested
+    // relationship shape so the hook's path-based field reader works as in live.
+    if (soql.includes("pse__Project__r.pse__Project_Manager__r.Name IN (")) {
+      const inScope = PEOPLE.filter((p) => p.grp !== "Unscoped Group");
+      const mk = (p, i, half, rev) => ({
+        Id: `tc-r${i}${half}`,
+        Name: `TC-${4000 + i}${half}`,
+        pse__Resource__r: { Name: p.name },
+        pse__Project__r: {
+          Name: `${p.pm.split(" ")[0]} Project ${i + 1}`,
+          pse__Account__r: { Name: `Account ${String.fromCharCode(65 + (i % 8))}` },
+          pse__Group__r: { Name: p.grp },
+          pse__Project_Manager__r: { Name: p.pm },
+        },
+        pse__Total_Hours__c: Math.round(p.hours * (half === "a" ? 0.6 : 0.4) * factor),
+        Total_Billable_Amount_Formula__c: rev,
+        CAD_Revenue__c: rev,
+        pse__Billable__c: true,
+        pse__Time_Credited__c: false,
+        pse__Start_Date__c: half === "a" ? "2026-04-13" : "2026-04-20",
+        Project_Source__c: "Managed Services",
+      });
+      return { records: inScope.flatMap((p, i) => [mk(p, i, "a", Math.round(p.revenue * 0.6 * factor)), mk(p, i, "b", Math.round(p.revenue * 0.4 * factor))]) };
+    }
     if (soql.includes("CAD_Revenue__c !=")) {
       return { records: [{ Id: "tc1", Name: "TC-2201", resource: "Sarah Kim", proj: "Michelle Project 1", cadRevenue: 31000, formulaRevenue: 30200, startDate: "2026-04-13" }] };
     }
@@ -112,8 +147,11 @@ export function sfFixture(soql) {
       }
       return { records: VACATION.map((v) => ({ resource: v.name, hours: v.hours })) };
     }
-    // Credited: utilization variant groups by resource only; period variant adds grp/pm.
+    // Credited: by-project (account level), by group+pm (period), or by resource (utilization).
     if (soql.includes("pse__Time_Credited__c=true") || soql.includes("pse__Time_Credited__c = true")) {
+      if (soql.includes("pse__Project__c projId")) {
+        return { records: [{ projId: "p1", hours: 6 }, { projId: "p4", hours: 4 }] };
+      }
       if (soql.includes("pse__Project__r.pse__Group__r.Name grp")) {
         return { records: CREDITED.map((c) => ({ grp: c.grp, pm: c.pm, hours: c.hours })) };
       }
@@ -142,5 +180,50 @@ export function sfFixture(soql) {
     }
   }
 
+  // Account management: Scheduled Business Reviews (QBRs)
+  if (soql.includes("FROM Scheduled_Business_Review__c")) {
+    return { records: [
+      { Name: "SBR-1001", Account__c: "001a", Account__r: { Name: "Acme Corp" }, Date__c: "2026-05-12", Status__c: "Completed", SBR_Outcome__c: "Services Continuation", Client_Temperature__c: "Green (good)", X3_Month_Forecast__c: "Increase", Account_Manager__r: { Name: "Megan Diplock" }, Summary__c: "Happy with delivery, asking about AI use cases.", SBR_Outcome_Notes__c: "Renew managed services, scope an AI pilot.", Health_Summary__c: "Strong relationship.", AM_Growth_Notes__c: "Expansion likely next quarter." },
+      { Name: "SBR-1002", Account__c: "001b", Account__r: { Name: "Globex Inc." }, Date__c: "2026-04-22", Status__c: "Completed", SBR_Outcome__c: "Churn", Client_Temperature__c: "Red (bad)", X3_Month_Forecast__c: "Decrease", Account_Manager__r: { Name: "Aldus Behan" }, Summary__c: "Frustrated with response times, budget under review.", SBR_Outcome_Notes__c: "Escalation: exec sponsor wants a recovery plan.", Health_Summary__c: "At risk.", AM_Growth_Notes__c: "" },
+      { Name: "SBR-1003", Account__c: "001c", Account__r: { Name: "Initech" }, Date__c: "2026-06-01", Status__c: "Scheduled", SBR_Outcome__c: "Hours Expansion", Client_Temperature__c: "Gold (gold)", X3_Month_Forecast__c: "Stay the Same", Account_Manager__r: { Name: "Meghan Saunders" }, Summary__c: "Scaling, also asking about AI.", SBR_Outcome_Notes__c: "Increase weekly hours.", Health_Summary__c: "Good.", AM_Growth_Notes__c: "Add a second pod." },
+    ] };
+  }
+
+  // Account management: Opportunity aggregates / detail
+  if (soql.includes("FROM Opportunity")) {
+    if (soql.includes("GROUP BY IsWon")) {
+      return { records: [{ won: true, cnt: 9, amount: 412000 }, { won: false, cnt: 11, amount: 268000 }] };
+    }
+    if (soql.includes("COUNT(Id) cnt")) {
+      return { records: [{ cnt: 24, amount: 1180000 }] };
+    }
+    if (soql.includes("AccountId, Amount, IsWon, CreatedDate")) {
+      return { records: [
+        { AccountId: "001a", Amount: 60000, IsWon: true, CreatedDate: "2026-05-20T10:00:00.000+0000" },
+        { AccountId: "001a", Amount: 40000, IsWon: false, CreatedDate: "2026-06-02T10:00:00.000+0000" },
+        { AccountId: "001c", Amount: 90000, IsWon: false, CreatedDate: "2026-06-10T10:00:00.000+0000" },
+      ] };
+    }
+  }
+
   return { records: [] };
+}
+
+// Canned describe for the report builder's column picker (fixtures mode). A
+// representative slice of pse__Timecard__c direct fields with label / API name /
+// type / filterable / groupable, mirroring the live describe payload shape.
+export function describeFixture(_sobject) {
+  return {
+    fields: [
+      { label: "Total Hours", name: "pse__Total_Hours__c", type: "double", filterable: true, groupable: false, custom: true },
+      { label: "Total Billable Amount (Formula)", name: "Total_Billable_Amount_Formula__c", type: "double", filterable: true, groupable: false, custom: true },
+      { label: "CAD Revenue", name: "CAD_Revenue__c", type: "double", filterable: true, groupable: false, custom: true },
+      { label: "Billable", name: "pse__Billable__c", type: "boolean", filterable: true, groupable: true, custom: true },
+      { label: "Time Credited", name: "pse__Time_Credited__c", type: "boolean", filterable: true, groupable: true, custom: true },
+      { label: "Approved", name: "pse__Approved__c", type: "boolean", filterable: true, groupable: true, custom: true },
+      { label: "Start Date", name: "pse__Start_Date__c", type: "date", filterable: true, groupable: true, custom: true },
+      { label: "Project Source", name: "Project_Source__c", type: "string", filterable: true, groupable: false, custom: true },
+      { label: "Name", name: "Name", type: "string", filterable: true, groupable: true, custom: false },
+    ],
+  };
 }

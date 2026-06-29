@@ -6,7 +6,7 @@
 // callClaude is retained for the AI workflow (vacation-coverage / sendPrompt),
 // which talks to the Anthropic Messages API. It is NOT used for data anymore.
 import { MODE, SF_API_VERSION } from "./env.js";
-import { sfFixture } from "./fixtures.js";
+import { sfFixture, describeFixture } from "./fixtures.js";
 import { getAuth } from "./sfAuth.js";
 
 export async function callSF(soql) {
@@ -15,18 +15,73 @@ export async function callSF(soql) {
   return queryViaProxy(soql);
 }
 
-// dev:live — local Node proxy reuses the sf CLI auth.
-async function queryViaProxy(soql) {
-  const resp = await fetch("/api/sf", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ soql }),
+// Describe an sobject's fields (label + API name + type + filterable/groupable)
+// for the report builder's column picker. Same data choke-point and three modes
+// as callSF: fixtures (canned), proxy (GET /api/describe), oauth (REST describe).
+export async function describeSObject(sobject) {
+  if (MODE === "fixtures") return describeFixture(sobject);
+  if (MODE === "oauth") return describeDirect(sobject);
+  return describeViaProxy(sobject);
+}
+
+async function describeViaProxy(sobject) {
+  const resp = await fetch(`/api/describe?sobject=${encodeURIComponent(sobject)}`);
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error("SF describe " + resp.status + (detail ? ": " + detail : ""));
+  }
+  return resp.json(); // { fields: [...] }
+}
+
+async function describeDirect(sobject) {
+  const auth = getAuth();
+  if (!auth?.access_token) throw new Error("Not signed in to Salesforce");
+  const resp = await fetch(`${auth.instance_url}/services/data/v${SF_API_VERSION}/sobjects/${encodeURIComponent(sobject)}/describe/`, {
+    headers: { Authorization: `Bearer ${auth.access_token}`, Accept: "application/json" },
   });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => "");
-    throw new Error("SF proxy " + resp.status + (detail ? ": " + detail : ""));
+    throw new Error("Salesforce " + resp.status + (detail ? ": " + detail : ""));
   }
-  return resp.json();
+  const data = await resp.json();
+  return { fields: (data.fields || []).map((f) => ({ label: f.label, name: f.name, type: f.type, filterable: !!f.filterable, groupable: !!f.groupable, custom: !!f.custom })) };
+}
+
+// dev:live — local Node proxy reuses the sf CLI auth.
+//
+// The Vite dev proxy intermittently resets the socket to the local Node proxy on
+// larger responses (ECONNRESET) and can leave a request hanging. So each call has
+// a timeout and one automatic retry on a transient failure (reset / hang / network)
+// — a real Salesforce error response (non-2xx with a body) is NOT retried. This
+// keeps a single flaky hop from hanging a whole tab's load.
+async function queryViaProxy(soql) {
+  const attempt = async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const resp = await fetch("/api/sf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ soql }),
+        signal: ctrl.signal,
+      });
+      if (!resp.ok) {
+        const detail = await resp.text().catch(() => "");
+        const err = new Error("SF proxy " + resp.status + (detail ? ": " + detail : ""));
+        err.real = true; // a genuine server response, do not retry
+        throw err;
+      }
+      return await resp.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  try {
+    return await attempt();
+  } catch (e) {
+    if (e?.real) throw e;          // real SF/HTTP error: surface immediately
+    return await attempt();         // transient (abort/reset/network): one retry
+  }
 }
 
 // production — query Salesforce REST API directly with the viewer's OAuth token.
@@ -50,18 +105,31 @@ async function queryDirect(soql) {
   return { records, totalSize: records.length };
 }
 
-// ── Anthropic Messages API (for the AI workflow only) ────────────────────────────
-export async function callClaude(prompt, mcpUrl, mcpName) {
-  const body = { model: "claude-sonnet-4-6", max_tokens: 1000, messages: [{ role: "user", content: prompt }] };
-  if (mcpUrl) body.mcp_servers = [{ type: "url", url: mcpUrl, name: mcpName }];
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+// ── AI workflow (Anthropic). NOT data. Routed through the local proxy (/api/claude)
+// which holds the API key server-side and forwards to the Anthropic Messages API,
+// mirroring callSF's transport (no key in the browser, no CORS). Returns { text }.
+// Fixtures mode returns a canned sample so the UI is demoable without a key/proxy.
+export async function callClaude(prompt, opts = {}) {
+  if (MODE === "fixtures") return { text: AI_FIXTURE };
+  const resp = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, max_tokens: opts.maxTokens || 2048 }),
   });
-  if (!resp.ok) throw new Error("API " + resp.status);
-  const data = await resp.json();
-  const tr = data.content?.find((b) => b.type === "mcp_tool_result");
-  if (tr?.content?.[0]?.text) { try { return JSON.parse(tr.content[0].text); } catch {} return tr.content[0].text; }
-  const tx = data.content?.find((b) => b.type === "text");
-  if (tx?.text) { const m = tx.text.match(/\{[\s\S]*\}/); if (m) { try { return JSON.parse(m[0]); } catch {} } return tx.text; }
-  return null;
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error("AI " + resp.status + (detail ? ": " + detail : ""));
+  }
+  return resp.json(); // { text }
 }
+
+const AI_FIXTURE = JSON.stringify({
+  themes: [
+    { theme: "Interest in AI use cases", accountCount: 2, summary: "Multiple accounts asking how to apply AI to their workflows." },
+    { theme: "Scaling and hours expansion", accountCount: 1, summary: "Accounts growing and looking to add capacity." },
+  ],
+  risks: [
+    { account: "Globex Inc.", note: "Health red, frustrated with response times, budget under review. Exec wants a recovery plan." },
+  ],
+  sentiment: ["Acme Corp trending positive toward expansion.", "Globex Inc. escalated, churn risk."],
+});

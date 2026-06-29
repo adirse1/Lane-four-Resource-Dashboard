@@ -124,6 +124,27 @@ export function calcWDWeek(weekStart, holDates) {
   return c;
 }
 
+// Working days (Mon-Fri minus holidays) in an inclusive [start, end] date range.
+// holDates is a Set of "YYYY-MM-DD" enabled-holiday strings. Used by the resource
+// planner to distribute an assignment's scheduled hours across its span and to
+// size each week, without hardcoding holidays. Counts weekdays by formula, then
+// subtracts holidays that land on a weekday in range (O(holidays), not O(days)).
+export function countWD(start, end, holDates) {
+  const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  if (e < s) return 0;
+  const totalDays = Math.round((e - s) / 86400000) + 1;
+  let wd = Math.floor(totalDays / 7) * 5;
+  const rem = totalDays % 7, dow0 = s.getDay();
+  for (let i = 0; i < rem; i++) { const d = (dow0 + i) % 7; if (d !== 0 && d !== 6) wd++; }
+  holDates.forEach((isoStr) => {
+    const [y, m, dd] = isoStr.split("-").map(Number);
+    const hd = new Date(y, m - 1, dd);
+    if (hd >= s && hd <= e) { const dow = hd.getDay(); if (dow !== 0 && dow !== 6) wd--; }
+  });
+  return wd;
+}
+
 export function calcQWD(year, qNum, hState) {
   const FISCAL_Q = {
     1: [{ y: year, m: 7 }, { y: year, m: 8 }, { y: year, m: 9 }],

@@ -14,7 +14,7 @@
 import { createServer } from "node:http";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,24 @@ import { fileURLToPath } from "node:url";
 const execAsync = promisify(exec);
 const PORT = process.env.PORT || 8787;
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+// Load a gitignored server/.env (KEY=VALUE per line) into process.env, so local
+// secrets like ANTHROPIC_API_KEY can live in a file instead of on the command
+// line. An already-set environment variable wins (so `VAR=... npm run proxy`
+// still overrides the file). This is local-only; nothing here is ever bundled
+// into the browser build. No dependency, mirrors the .sforg file convention.
+function loadDotEnv() {
+  let txt;
+  try { txt = readFileSync(join(HERE, ".env"), "utf8"); } catch { return; }
+  for (const line of txt.split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!m) continue; // skips blanks and # comments
+    let val = m[2].trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+    if (process.env[m[1]] === undefined) process.env[m[1]] = val;
+  }
+}
+loadDotEnv();
 
 // Which authenticated sf org to query. Resolution order: SF_ORG env var, then
 // the gitignored server/.sforg file, then the sf CLI default org.
@@ -31,6 +49,8 @@ function resolveOrg() {
 }
 const SF_ORG = resolveOrg();
 const HIERARCHY_FILE = join(HERE, "data", "hierarchy.json");
+const SCENARIO_DIR = join(HERE, "data", "forecast-scenarios");
+const safeScenario = (n) => String(n || "").replace(/[^a-zA-Z0-9 _-]/g, "").trim();
 
 let authCache = null; // { token, instanceUrl, version }
 
@@ -76,6 +96,24 @@ async function query(soql) {
   return { records, totalSize: records.length };
 }
 
+// Describe one sobject, returning a trimmed field list for the report builder's
+// column picker (label + API name + type + filterable/groupable flags). Same
+// 401-refresh-once pattern as query(). Not SOQL, so it is not in the query tests.
+async function describe(sobject) {
+  let a = await auth();
+  const run = async () =>
+    fetch(`${a.instanceUrl}/services/data/v${a.version}/sobjects/${encodeURIComponent(sobject)}/describe/`, { headers: { Authorization: `Bearer ${a.token}`, Accept: "application/json" } });
+  let resp = await run();
+  if (resp.status === 401) { a = await auth(true); resp = await run(); }
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`Salesforce ${resp.status}: ${body}`);
+  }
+  const d = await resp.json();
+  const fields = (d.fields || []).map((f) => ({ label: f.label, name: f.name, type: f.type, filterable: !!f.filterable, groupable: !!f.groupable, custom: !!f.custom }));
+  return { fields };
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => resolve(b)); req.on("error", reject);
@@ -105,6 +143,52 @@ const server = createServer(async (req, res) => {
       await writeFile(HIERARCHY_FILE, await readBody(req));
       return json(res, 200, { ok: true });
     }
+    // Forecast scenarios: list / read / write under data/forecast-scenarios/.
+    if (req.method === "GET" && req.url.startsWith("/api/scenarios")) {
+      try { await mkdir(SCENARIO_DIR, { recursive: true }); const files = await readdir(SCENARIO_DIR); return json(res, 200, { scenarios: files.filter((f) => f.endsWith(".json")).map((f) => f.replace(/\.json$/, "")) }); }
+      catch { return json(res, 200, { scenarios: [] }); }
+    }
+    if (req.method === "GET" && req.url.startsWith("/api/scenario?")) {
+      const nm = safeScenario(new URL(req.url, "http://localhost").searchParams.get("name"));
+      if (!nm) return json(res, 400, { error: "missing name" });
+      try { return json(res, 200, JSON.parse(await readFile(join(SCENARIO_DIR, nm + ".json"), "utf8"))); }
+      catch { return json(res, 404, { error: "scenario not found" }); }
+    }
+    if (req.method === "POST" && req.url === "/api/scenario") {
+      const body = JSON.parse(await readBody(req));
+      const nm = safeScenario(body.name);
+      if (!nm) return json(res, 400, { error: "invalid name" });
+      await mkdir(SCENARIO_DIR, { recursive: true });
+      await writeFile(join(SCENARIO_DIR, nm + ".json"), JSON.stringify(body.scenario ?? {}, null, 2));
+      return json(res, 200, { ok: true, name: nm });
+    }
+    // AI synthesis: forward a prompt to the Anthropic Messages API with the key held
+    // here (never in the browser). Requires ANTHROPIC_API_KEY in the proxy's env.
+    if (req.method === "POST" && req.url === "/api/claude") {
+      const key = process.env.ANTHROPIC_API_KEY;
+      if (!key) return json(res, 400, { error: "ANTHROPIC_API_KEY is not set on the proxy; AI analysis is unavailable" });
+      const { prompt, max_tokens } = JSON.parse(await readBody(req));
+      if (!prompt) return json(res, 400, { error: "missing prompt" });
+      const t0 = Date.now();
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: max_tokens || 2048, messages: [{ role: "user", content: prompt }] }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) return json(res, r.status, { error: data?.error?.message || ("Anthropic " + r.status) });
+      const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+      console.log(`  AI ${Date.now() - t0}ms, ${text.length} chars`);
+      return json(res, 200, { text });
+    }
+    if (req.method === "GET" && req.url.startsWith("/api/describe")) {
+      const so = new URL(req.url, "http://localhost").searchParams.get("sobject") || "";
+      if (!/^[A-Za-z0-9_]+$/.test(so)) return json(res, 400, { error: "invalid sobject" });
+      const t0 = Date.now();
+      const result = await describe(so);
+      console.log(`  DESC ${result.fields.length} fields in ${Date.now() - t0}ms  ${so}`);
+      return json(res, 200, result);
+    }
     if (req.method === "GET" && req.url === "/api/health") {
       const a = await auth();
       return json(res, 200, { ok: true, org: SF_ORG || "(default)", instanceUrl: a.instanceUrl, version: a.version });
@@ -116,7 +200,14 @@ const server = createServer(async (req, res) => {
   }
 });
 
+// Keep idle keep-alive sockets open longer than Vite's dev-proxy agent holds them
+// (default Node keepAliveTimeout is 5s; Vite reuses sockets and hits ECONNRESET if
+// Node closed first). headersTimeout must exceed keepAliveTimeout.
+server.keepAliveTimeout = 75000;
+server.headersTimeout = 76000;
+
 server.listen(PORT, () => {
   console.log(`Lane Four SF proxy on http://localhost:${PORT}  (org: ${SF_ORG || "sf default"})`);
   console.log(`  GET /api/health to verify the Salesforce connection.`);
+  console.log(`  AI analysis (/api/claude): ${process.env.ANTHROPIC_API_KEY ? "key loaded" : "no key set, AI unavailable"}`);
 });

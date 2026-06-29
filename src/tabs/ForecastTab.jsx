@@ -1,163 +1,181 @@
-// Forecast: month-level revenue projection with vacation coverage.
-//
-// KNOWN BUG (from README): the bars use rough multipliers (ceiling = revenue x 1.3,
-// forecast = revenue x 0.55), NOT real remaining-assignment math. Directional only
-// until this tab is rebuilt off pse__Assignment__c. Preserved verbatim here.
-//
-// sendPrompt was an undefined global in the original single-file build (the
-// "Find coverage" button would throw). It now arrives as a prop; the default
-// no-ops with a warning so the button degrades gracefully instead of crashing.
-import { useState } from "react";
+// Forecast: forward capacity forecast for Aldus + Meghan, by pod, off real
+// scheduled assignments (same source/bucketing as the resource planner). A
+// 30/60/90-day window toggle drives the whole view; each pod (and, on expand, each
+// person) gets a stacked committed bar broken into the categories discovery
+// confirmed exist forward (billable, non-billable, vacation), then the gap to
+// capacity. There is no credited segment (no forward scheduled equivalent).
+// Data and bucketing live in useForecast; this is layout/interaction.
+import { useState, useEffect } from "react";
 import { B } from "../constants/brand.js";
-import { fmt, fmtK } from "../lib/format.js";
-import { groupTotal } from "../lib/period.js";
-import { calcWDElapsed, getEnabledHols } from "../lib/holidays.js";
-import { HelpIcon } from "../components/index.js";
+import { fmtH } from "../lib/format.js";
+import { Spinner } from "../components/index.js";
+import { useForecast } from "../hooks/useForecast.js";
 
-export default function ForecastTab({
-  periodA, periodB, dataA, dataB, vacData, hState, setAuditKey,
-  sendPrompt = (p) => console.warn("sendPrompt not wired:", p),
-}) {
-  const [expandedPods, setExpandedPods] = useState({});
-  const wdA = periodA?.wd || 1;
-  const wdB = periodB?.wd || 1;
+// Stacked-bar categories, in stack order. Distinct brand colours. Keys match the
+// `segments` object the hook returns. Vacation is shown as committed time (it does
+// not reduce capacity), so the gap is the true free capacity after PTO.
+const SEG_DEFS = [
+  { key: "billable", label: "Billable", color: B.teal },
+  { key: "nonbillable", label: "Non-billable", color: B.purple },
+  { key: "vacation", label: "Vacation", color: B.yellow },
+];
 
-  const lA = periodA?.label || "Current";
-  const wdEl = periodA?.month ? calcWDElapsed(periodA.year, periodA.month, getEnabledHols(periodA.year, "CA", hState)) : 0;
-  const vacTotal = (vacData || []).reduce((s, r) => s + (r.hours || 0), 0);
-  const revToDate = dataA ? groupTotal(dataA.pmMap, ["Aldus Behan", "Meghan Saunders", "Lane Four"]).rev : 0;
-  const rpdToDate = wdEl > 0 ? revToDate / wdEl : 0;
+export default function ForecastTab({ H, hState }) {
+  const { data, loading, loadMsg, error, load } = useForecast(H, hState);
+  const [windowDays, setWindowDays] = useState(30);
+  const [expanded, setExpanded] = useState({});
+
+  useEffect(() => { load(); }, [load]);
+
+  const utilColor = (u) => (u <= 0 ? "#94a3b8" : u > 1.05 ? B.redTx : u >= 0.85 ? B.greenTx : B.blueTx);
+
+  if (error) return (
+    <div style={{ textAlign: "center", padding: 40 }}>
+      <div style={{ fontSize: 12, color: B.redTx, background: B.redBg, borderRadius: 8, padding: "10px 14px", marginBottom: 14, display: "inline-block" }}>Could not load forecast: {error}</div>
+      <div><button onClick={load} style={{ fontSize: 12, padding: "8px 20px", background: B.teal, color: B.white, border: "none", borderRadius: 6, cursor: "pointer" }}>Retry</button></div>
+    </div>
+  );
+  if (loading || !data) return <Spinner msg={loadMsg || "Loading forecast..."} />;
+
+  const { directors, overall } = data;
+  const segCount = windowDays / 30; // 1, 2, or 3 segments
+  const winSum = (arr) => arr.slice(0, segCount).reduce((a, b) => a + b, 0);
+  // Committed split for a group, summed across the active window.
+  const splitOf = (g) => {
+    const parts = {}; SEG_DEFS.forEach((s) => { parts[s.key] = winSum(g.segments?.[s.key] || []); });
+    return parts;
+  };
+  const cols = "230px 1fr 132px 118px";
+
+  // Stacked committed bar: billable | non-billable | vacation, then the gap track.
+  // Under capacity, segments are sized against capacity so the gap is visible. Over
+  // capacity, they are sized against the committed total so the bar fills and the
+  // over flag (text) carries the overflow.
+  const Bar = ({ parts, cap }) => {
+    const com = SEG_DEFS.reduce((a, s) => a + (parts[s.key] || 0), 0);
+    const over = com > cap;
+    const denom = Math.max(cap, com, 1);
+    const tip = SEG_DEFS.map((s) => `${fmtH(parts[s.key] || 0)}h ${s.label.toLowerCase()}`).join(", ") + ` of ${fmtH(cap)}h capacity`;
+    return (
+      <div title={tip} style={{ display: "flex", height: 16, background: B.lgray, borderRadius: 8, overflow: "hidden", border: over ? `1px solid ${B.red}` : "none" }}>
+        {SEG_DEFS.map((s) => {
+          const w = ((parts[s.key] || 0) / denom) * 100;
+          return w > 0 ? <div key={s.key} style={{ width: w + "%", height: "100%", background: s.color, transition: "width .2s" }} /> : null;
+        })}
+      </div>
+    );
+  };
+
+  // One row: name (+chevron), stacked bar, hours, gap-or-over note.
+  const Row = ({ g, depth, expandable, open, onClick }) => {
+    const parts = splitOf(g);
+    const com = winSum(g.committed), cap = winSum(g.capacity);
+    const u = cap > 0 ? com / cap : 0;
+    const over = com > cap;
+    const gap = Math.max(cap - com, 0);
+    const overflow = Math.max(com - cap, 0);
+    return (
+      <div onClick={onClick} style={{ display: "grid", gridTemplateColumns: cols, alignItems: "center", gap: 12, padding: depth === 2 ? "5px 14px 5px 0" : "8px 14px", borderBottom: `0.5px solid ${B.lgray}`, cursor: expandable ? "pointer" : "default", background: depth === 0 ? B.offwhite : "transparent" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: depth * 16, overflow: "hidden" }}>
+          {expandable ? <span style={{ fontSize: 9, color: "#bbb", flex: "none", transition: "transform .15s", transform: open ? "rotate(90deg)" : "none" }}>▶</span> : <span style={{ width: 9, flex: "none" }} />}
+          <span style={{ fontSize: depth === 0 ? 13 : 12, fontWeight: depth === 0 ? 700 : depth === 1 ? 600 : 400, fontFamily: depth < 2 ? "'Poppins',sans-serif" : "'Open Sans',sans-serif", color: depth === 0 ? B.black : depth === 1 ? B.teal : "#475569", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {depth === 2 ? g.name.split(" ")[0] + " " + (g.name.split(" ").slice(-1)[0] || "") : g.name}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ flex: 1 }}><Bar parts={parts} cap={cap} /></div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: utilColor(u), fontFamily: "'Open Sans',sans-serif", minWidth: 34, textAlign: "right" }}>{cap > 0 ? Math.round(u * 100) + "%" : "—"}</span>
+        </div>
+        <div style={{ fontSize: 11, color: "#666", textAlign: "right", fontFamily: "'Open Sans',sans-serif", fontVariantNumeric: "tabular-nums" }}>{fmtH(com)} / {fmtH(cap)}h</div>
+        <div style={{ fontSize: 11, textAlign: "right", fontFamily: "'Open Sans',sans-serif", fontWeight: 600, color: over ? B.redTx : B.teal }}>
+          {over ? `over by ${fmtH(overflow)}h` : `${fmtH(gap)}h to fill`}
+        </div>
+      </div>
+    );
+  };
+
+  const card = (label, val, sub, valColor) => (
+    <div key={label} style={{ background: B.offwhite, borderRadius: 8, padding: "11px 13px", fontFamily: "'Open Sans',sans-serif" }}>
+      <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: valColor || B.black, lineHeight: 1, fontFamily: "'Poppins',sans-serif" }}>{val}</div>
+      <div style={{ fontSize: 11, color: "#aaa", marginTop: 3 }}>{sub}</div>
+    </div>
+  );
+
+  const com = winSum(overall.committed), cap = winSum(overall.capacity);
+  const overallU = cap > 0 ? com / cap : 0;
+  const overallParts = splitOf(overall);
+  const windowLabel = `next ${windowDays} days`;
+  // Only show legend chips for categories that actually have hours forward.
+  const liveSegs = SEG_DEFS.filter((s) => (overallParts[s.key] || 0) > 0);
+  const committedSub = liveSegs.length
+    ? liveSegs.map((s) => `${fmtH(overallParts[s.key])} ${s.label.toLowerCase()}`).join(", ")
+    : windowLabel;
 
   return (
-    <div>
-      <div style={{ fontSize: 11, color: "#888", background: B.offwhite, borderRadius: 8, padding: "6px 12px", display: "flex", alignItems: "center", gap: 6, marginBottom: 14, fontFamily: "'Open Sans',sans-serif", flexWrap: "wrap" }}>
-        📅 {lA} ·&nbsp; {wdEl} of {wdA} working days elapsed ({wdA > 0 ? Math.round((wdEl / wdA) * 100) : 0}%) ·&nbsp; Actuals = approved timecards ·&nbsp; Forecast = remaining scheduled assignments
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
-        {[
-          { label: `${lA} RPD to date`, val: fmt(rpdToDate), sub: `${fmtK(revToDate)} logged`, help: "RPD from actuals only", calc: "Revenue logged ÷ elapsed working days", ak: "rpd" },
-          { label: "Vacation hrs", val: `${Math.round(vacTotal)} hrs`, sub: "Internal - Vacation Time", help: "Vacation hours", calc: "Approved splits on 'Internal - Vacation Time'", ak: "vacation" },
-          { label: "Working days", val: `${wdEl} / ${wdA}`, sub: "elapsed / total (CA)", help: "Working days", calc: "Weekdays minus enabled CA holidays", ak: "working_days" },
-          { label: "Utilization ceiling", val: `${wdA > 0 ? Math.round((revToDate / (revToDate * 1.25 || 1)) * 100) : 0}%`, sub: "of est. full capacity", help: "Full utilization ceiling", calc: "Actual revenue ÷ estimated max", ak: "ceiling" },
-        ].map(({ label, val, sub, help, calc, ak }, i) => (
-          <div key={i} style={{ background: B.offwhite, borderRadius: 8, padding: "11px 13px", fontFamily: "'Open Sans',sans-serif" }}>
-            <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4, display: "flex", alignItems: "center" }}>
-              {label} <HelpIcon tip={help} calc={calc} auditKey={ak} onAudit={setAuditKey} />
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: B.black, lineHeight: 1, fontFamily: "'Poppins',sans-serif" }}>{val}</div>
-            <div style={{ fontSize: 11, color: "#aaa", marginTop: 3 }}>{sub}</div>
+    <div style={{ fontFamily: "'Open Sans',sans-serif" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-.01em", fontFamily: "'Poppins',sans-serif" }}>Forecast</div>
+          <div style={{ fontSize: 13, color: "#64748b", marginTop: 6, maxWidth: 700, lineHeight: 1.5 }}>Committed scheduled hours vs capacity for the {windowLabel} from today, Aldus and Meghan, by pod. Expand a pod to see each person's load and gap.</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", border: `0.5px solid ${B.lgray}`, borderRadius: 8, overflow: "hidden" }}>
+            {[30, 60, 90].map((w) => (
+              <button key={w} onClick={() => setWindowDays(w)} style={{ fontSize: 12, fontWeight: windowDays === w ? 700 : 500, padding: "6px 14px", border: "none", cursor: "pointer", background: windowDays === w ? B.teal : "transparent", color: windowDays === w ? B.white : "#64748b", fontFamily: "'Open Sans',sans-serif" }}>{w} days</button>
+            ))}
           </div>
-        ))}
+          <button onClick={load} style={{ fontSize: 11, padding: "6px 10px", border: `0.5px solid ${B.lgray}`, borderRadius: 8, background: "transparent", cursor: "pointer" }}>↺</button>
+        </div>
       </div>
 
-      {["Aldus Behan", "Meghan Saunders"].map((dir) => {
-        const aD = groupTotal(dataA?.pmMap, [dir]);
-        const bD = groupTotal(dataB?.pmMap, [dir]);
-        const vacDir = (vacData || []).filter((r) => r.grp === dir).reduce((s, r) => s + (r.hours || 0), 0);
-        const ceiling = aD.rev * 1.3;
-        const pctA = ceiling > 0 ? Math.min((aD.rev / ceiling) * 100, 100) : 0;
-        const pctV = ceiling > 0 ? Math.min((vacDir * 150 / ceiling) * 100, 8) : 0;
-        const pctF = ceiling > 0 ? Math.min(((aD.rev * .55) / ceiling) * 100, 100 - pctA - pctV) : 0;
-        const lastMoPct = ceiling > 0 ? Math.min((bD.rev / ceiling) * 95, 99) : 0;
-        const pms = dataA?.pmMap?.[dir]?.pms || {};
-        const vacByPM = {};
-        (vacData || []).filter((r) => r.grp === dir).forEach((r) => { vacByPM[r.pm] = (vacByPM[r.pm] || 0) + (r.hours || 0); });
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, 220px)", justifyContent: "start", gap: 16, marginBottom: 16 }}>
+        {card(`Utilization (${windowLabel})`, cap > 0 ? Math.round(overallU * 100) + "%" : "—", "committed vs capacity", utilColor(overallU))}
+        {card("Committed hours", fmtH(com), committedSub)}
+        {card("Capacity hours", fmtH(cap), "working days × 8h")}
+        {card("Room to fill", overallU > 1 ? "over by " + fmtH(com - cap) + "h" : fmtH(cap - com) + "h", "unfilled capacity", overallU > 1 ? B.redTx : B.teal)}
+      </div>
 
-        return (
-          <div key={dir} style={{ background: B.white, border: `0.5px solid ${B.lgray}`, borderRadius: 12, overflow: "hidden", marginBottom: 12 }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "12px 16px 0" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Poppins',sans-serif" }}>{dir.split(" ")[0]}</div>
-              <div style={{ fontSize: 11, color: "#888", fontFamily: "'Open Sans',sans-serif" }}>
-                {fmt(wdA > 0 ? aD.rev / wdA : 0)} RPD to date &nbsp;·&nbsp; {fmt(wdA > 0 ? bD.rev / wdB : 0)} {periodB?.label} RPD &nbsp;·&nbsp; {Math.round(vacDir)} vac hrs
-                <HelpIcon tip="Forecast ceiling" calc="Estimated max if all resources billed 40hrs every working day." auditKey="ceiling" onAudit={setAuditKey} />
-              </div>
-            </div>
-            <div style={{ padding: "10px 16px 12px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#bbb", marginBottom: 4, fontFamily: "'Open Sans',sans-serif" }}>
-                <span>$0</span><span>Full utilization ceiling <HelpIcon tip="Full utilization ceiling" calc="All resources × 8hrs × working days × effective rate" auditKey="ceiling" onAudit={setAuditKey} /></span>
-              </div>
-              <div style={{ height: 22, background: B.lgray, borderRadius: 4, display: "flex", overflow: "hidden", position: "relative" }}>
-                <div style={{ width: `${pctA}%`, background: B.teal, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                  {pctA > 10 && <span style={{ fontSize: 10, fontWeight: 600, color: B.greenTx, whiteSpace: "nowrap", padding: "0 4px", fontFamily: "'Open Sans',sans-serif" }}>{fmtK(aD.rev)}</span>}
-                </div>
-                <div style={{ width: `${pctV}%`, background: B.yellow, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                  {pctV > 3 && <span style={{ fontSize: 10, fontWeight: 600, color: B.amberTx, fontFamily: "'Open Sans',sans-serif" }}>vac</span>}
-                </div>
-                <div style={{ width: `${pctF}%`, background: "rgba(44,204,211,0.18)", borderTop: `1.5px dashed ${B.tealDash}`, borderBottom: `1.5px dashed ${B.tealDash}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                  {pctF > 8 && <span style={{ fontSize: 10, color: B.greenTx, fontFamily: "'Open Sans',sans-serif" }}>forecast</span>}
-                </div>
-                <div style={{ position: "absolute", left: `${lastMoPct}%`, top: 0, width: 2, height: "100%", background: "#888", opacity: .6, zIndex: 2 }}>
-                  <div style={{ position: "absolute", top: 3, left: 4, fontSize: 9, color: "#666", whiteSpace: "nowrap", fontFamily: "'Open Sans',sans-serif" }}>{periodB?.label}</div>
-                </div>
-                <div style={{ position: "absolute", right: 0, top: 0, width: 2, height: "100%", background: B.orange }} />
-              </div>
-              <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap" }}>
-                {[{ c: B.teal, l: "Actuals" }, { c: B.yellow, l: "Vacation" }, { c: "rgba(44,204,211,0.25)", l: "Forecast", d: true }, { c: "#888", l: `${periodB?.label} RPD`, line: true }, { c: B.orange, l: "Ceiling" }].map(({ c, l, d, line }) => (
-                  <div key={l} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#888", fontFamily: "'Open Sans',sans-serif" }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 2, background: line ? "transparent" : c, border: d ? `1px dashed ${B.tealDash}` : "none", borderLeft: line ? "3px solid #888" : undefined, flexShrink: 0 }} />
-                    {l}
-                  </div>
-                ))}
-              </div>
-            </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 8, flexWrap: "wrap", fontFamily: "'Open Sans',sans-serif" }}>
+        {liveSegs.map((s) => (
+          <span key={s.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#64748b" }}>
+            <span style={{ width: 11, height: 11, borderRadius: 3, background: s.color }} />{s.label}
+          </span>
+        ))}
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#64748b" }}>
+          <span style={{ width: 11, height: 11, borderRadius: 3, background: B.lgray }} />Gap to capacity
+        </span>
+      </div>
 
-            <div style={{ borderTop: `0.5px solid ${B.lgray}` }}>
-              <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 72px 56px 52px 20px", padding: "4px 16px", borderBottom: `0.5px solid ${B.lgray}`, background: B.offwhite }}>
-                {["Pod lead", "Actuals / vac / forecast", `${lA} RPD`, "Vac hrs", "Ceiling", ""].map((h, i) => (
-                  <div key={i} style={{ fontSize: 10, color: "#bbb", textTransform: "uppercase", letterSpacing: ".04em", fontFamily: "'Open Sans',sans-serif", textAlign: i > 1 && i < 5 ? "right" : "left" }}>{h}</div>
-                ))}
-              </div>
-              {Object.entries(pms).sort((a, b) => b[1].revenue - a[1].revenue).map(([pm, d]) => {
-                const pmVac = vacByPM[pm] || 0;
-                const pmRpd = wdA > 0 ? d.revenue / wdA : 0;
-                const pmCeil = d.revenue * 1.3;
-                const pmPct = pmCeil > 0 ? Math.round((d.revenue / pmCeil) * 100) : 0;
-                const ceilColor = pmPct >= 85 ? B.green : pmPct >= 70 ? B.amber : B.red;
-                const isExp = !!(expandedPods?.[`${dir}-${pm}`]);
+      <div style={{ background: B.white, border: `0.5px solid ${B.lgray}`, borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: cols, gap: 12, padding: "7px 14px", background: B.offwhite, borderBottom: `0.5px solid ${B.lgray}` }}>
+          {["Team / pod / person", "Committed vs capacity", "Hours", "Gap"].map((h, i) => (
+            <div key={i} style={{ fontSize: 10, color: "#aaa", textTransform: "uppercase", letterSpacing: ".04em", textAlign: i === 0 ? "left" : "right" }}>{h}</div>
+          ))}
+        </div>
+        {directors.map((d) => {
+          const dOpen = expanded[d.name] ?? true;
+          return (
+            <div key={d.name}>
+              <Row g={d} depth={0} expandable open={dOpen} onClick={() => setExpanded((e) => ({ ...e, [d.name]: !(e[d.name] ?? true) }))} />
+              {dOpen && d.pods.map((p) => {
+                const pKey = d.name + "::" + p.name;
+                const pOpen = expanded[pKey] ?? false;
                 return (
-                  <div key={pm} style={{ borderBottom: `0.5px solid ${B.lgray}` }}>
-                    <div
-                      style={{ display: "grid", gridTemplateColumns: "140px 1fr 72px 56px 52px 20px", padding: "8px 16px", cursor: "pointer", fontFamily: "'Open Sans',sans-serif", transition: "background .1s" }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = B.offwhite}
-                      onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
-                      onClick={() => setExpandedPods((p) => ({ ...p, [`${dir}-${pm}`]: !p[`${dir}-${pm}`] }))}
-                    >
-                      <div style={{ fontSize: 12, fontWeight: 600, color: B.black, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pm?.split(" ")[0]}</div>
-                      <div style={{ display: "flex", alignItems: "center", paddingRight: 8 }}>
-                        <div style={{ flex: 1, height: 10, background: B.lgray, borderRadius: 3, display: "flex", overflow: "hidden" }}>
-                          <div style={{ width: `${Math.min((d.revenue / (groupTotal(dataA?.pmMap, [dir]).rev || 1)) * 65, 60)}%`, background: B.teal, height: "100%" }} />
-                          <div style={{ width: `${Math.min((pmVac / 40) * 5, 8)}%`, background: B.yellow, height: "100%" }} />
-                          <div style={{ width: "18%", background: "rgba(44,204,211,0.2)", height: "100%", borderTop: `1px dashed ${B.tealDash}` }} />
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 12, textAlign: "right", fontWeight: 600 }}>{fmt(pmRpd)}</div>
-                      <div style={{ fontSize: 12, textAlign: "right", color: pmVac > 0 ? B.amber : "#ccc" }}>{pmVac > 0 ? `${Math.round(pmVac)}h` : "—"}</div>
-                      <div style={{ fontSize: 12, textAlign: "right", fontWeight: 600, color: ceilColor }}>{pmPct}%</div>
-                      <div style={{ fontSize: 13, color: "#bbb", textAlign: "right", transform: isExp ? "rotate(180deg)" : "none", transition: "transform .15s" }}>⌄</div>
-                    </div>
-                    {isExp && (
-                      <div style={{ background: B.offwhite, padding: "10px 16px 10px 36px", borderTop: `0.5px solid ${B.lgray}`, fontFamily: "'Open Sans',sans-serif" }}>
-                        {pmVac > 0 ? (
-                          <div>
-                            <div style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>{Math.round(pmVac)} vacation hrs this month — coverage analysis available</div>
-                            <button onClick={() => sendPrompt(`Run vacation coverage analysis for ${pm}'s pod in ${lA}. They have ${Math.round(pmVac)} vacation hours logged. Check which accounts are at risk and identify any backfill assignments company-wide.`)}
-                              style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, padding: "5px 12px", border: `0.5px solid ${B.lgray}`, borderRadius: 6, background: "transparent", cursor: "pointer", fontFamily: "'Open Sans',sans-serif" }}>
-                              ✦ Find coverage ↗
-                            </button>
-                          </div>
-                        ) : (
-                          <div style={{ fontSize: 11, color: "#bbb" }}>No vacation hours this month.</div>
-                        )}
-                      </div>
-                    )}
+                  <div key={pKey}>
+                    <Row g={p} depth={1} expandable={!!(p.members || []).length} open={pOpen} onClick={() => setExpanded((e) => ({ ...e, [pKey]: !e[pKey] }))} />
+                    {pOpen && (p.members || []).map((m) => <Row key={pKey + "::" + m.name} g={m} depth={2} />)}
                   </div>
                 );
               })}
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: 8, fontSize: 10, color: "#aaa", lineHeight: 1.5 }}>
+        This is committed scheduled assignments only, so it understates true future load: not-yet-signed work and not-yet-created assignments are not in Salesforce yet. Committed hours = each scheduled assignment's hours spread across its span working days, split into billable, non-billable (admin, professional development, pre-sales and similar internal work) and vacation (future PTO booked as assignments). All three count toward committed against capacity, so the gap is the free capacity left after non-billable time and PTO. Capacity = headcount × working days in the window × 8h (CA holidays applied), and is not reduced for vacation. Over 100% means more committed than capacity. There is no credited segment: credited time is a post-hoc timecard concept with no forward scheduled equivalent.
+      </div>
     </div>
   );
 }

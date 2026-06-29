@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import http from "node:http";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -11,6 +12,11 @@ export default defineConfig({
     port: 5173,
     open: true,
     // In live mode (npm run dev:live), /api/* is forwarded to the SF proxy.
-    proxy: { "/api": "http://localhost:8787" },
+    // keepAlive:false so Vite opens a fresh socket per request and never reuses
+    // one the Node proxy may have closed (the intermittent ECONNRESET that hung
+    // multi-request loads like the Actuals tab).
+    proxy: {
+      "/api": { target: "http://localhost:8787", changeOrigin: true, agent: new http.Agent({ keepAlive: false }) },
+    },
   },
 });

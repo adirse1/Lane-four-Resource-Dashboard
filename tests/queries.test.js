@@ -38,11 +38,28 @@ const cases = {
     Q.utilizationPersonDetail("Jordan Roylance", ms, me),
     `SELECT pse__Project__r.Name, pse__Project__r.pse__Account__r.Name, pse__Project__r.pse__Group__r.Name, pse__Project__r.pse__Project_Manager__r.Name, Project_Source__c, pse__Billable__c, pse__Time_Credited__c, pse__Total_Hours__c, Total_Billable_Amount_Formula__c, pse__Start_Date__c, Id FROM pse__Timecard__c WHERE pse__Approved__c=true AND pse__Resource__r.Name='Jordan Roylance' AND pse__Start_Date__c>=${ms} AND pse__Start_Date__c<=${me} ORDER BY pse__Project__r.Name, pse__Start_Date__c LIMIT 1000`,
   ],
-  // Resource planner: assignment -> schedule weekday pattern, scoped by resource.
-  // Non-aggregate, no field aliases; resource list is escaped + comma-joined.
-  resourcePlannerAssignments: [
-    Q.resourcePlannerAssignments("2026-06-22", "2026-10-12", ["Jordan Roylance", "Will Shorthouse"]),
-    `SELECT pse__Resource__r.Name, pse__Project__r.Name, pse__Project__r.pse__Group__r.Name, pse__Project__r.pse__Project_Manager__r.Name, pse__Schedule__r.pse__Start_Date__c, pse__Schedule__r.pse__End_Date__c, pse__Schedule__r.pse__Monday_Hours__c, pse__Schedule__r.pse__Tuesday_Hours__c, pse__Schedule__r.pse__Wednesday_Hours__c, pse__Schedule__r.pse__Thursday_Hours__c, pse__Schedule__r.pse__Friday_Hours__c, pse__Schedule__r.pse__Saturday_Hours__c, pse__Schedule__r.pse__Sunday_Hours__c, Id FROM pse__Assignment__c WHERE pse__Status__c='Scheduled' AND pse__Is_Billable__c=true AND pse__Schedule__c!=null AND pse__Resource__r.Name IN ('Jordan Roylance','Will Shorthouse') AND pse__Schedule__r.pse__End_Date__c>=2026-06-22 AND pse__Schedule__r.pse__Start_Date__c<=2026-10-12 ORDER BY pse__Resource__r.Name, pse__Schedule__r.pse__Start_Date__c`,
+  // Resource planner: assignments scoped by resource, scheduled hours distributed
+  // by the hook. Non-aggregate, no field aliases; resource list escaped + joined.
+  scheduledAssignments: [
+    Q.scheduledAssignments("2026-06-22", "2026-10-12", ["Jordan Roylance", "Will Shorthouse"]),
+    `SELECT pse__Resource__r.Name, pse__Project__r.Name, pse__Project__r.pse__Group__r.Name, pse__Project__r.pse__Project_Manager__r.Name, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c, Id FROM pse__Assignment__c WHERE pse__Status__c='Scheduled' AND pse__Is_Billable__c=true AND pse__Resource__r.Name IN ('Jordan Roylance','Will Shorthouse') AND pse__End_Date__c>=2026-06-22 AND pse__Start_Date__c<=2026-10-12 ORDER BY pse__Resource__r.Name, pse__Project__r.Name`,
+  ],
+  // Forecast variant: drops the billable-only filter and adds pse__Is_Billable__c
+  // so committed time can be split into billable / non-billable / vacation.
+  scheduledAssignmentsAll: [
+    Q.scheduledAssignments("2026-06-22", "2026-10-12", ["Jordan Roylance", "Will Shorthouse"], { includeNonBillable: true }),
+    `SELECT pse__Resource__r.Name, pse__Project__r.Name, pse__Project__r.pse__Group__r.Name, pse__Project__r.pse__Project_Manager__r.Name, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c, Id, pse__Is_Billable__c FROM pse__Assignment__c WHERE pse__Status__c='Scheduled' AND pse__Resource__r.Name IN ('Jordan Roylance','Will Shorthouse') AND pse__End_Date__c>=2026-06-22 AND pse__Start_Date__c<=2026-10-12 ORDER BY pse__Resource__r.Name, pse__Project__r.Name`,
+  ],
+  // Dynamic report builder: a new, additional builder (existing snapshots above are
+  // untouched). Asserts required group/scope fields are always present, dedup works,
+  // the month + PM scope + row cap are mandatory, and no aliasing.
+  buildTimecardReport: [
+    Q.buildTimecardReport({ fields: ["pse__Total_Hours__c", "Total_Billable_Amount_Formula__c"], monthStart: "2026-04-01", monthEnd: "2026-04-30", pmNames: ["Lindsay Chown", "Will Shorthouse"], orderBy: "pse__Project__r.pse__Project_Manager__r.Name" }),
+    `SELECT Id, pse__Resource__r.Name, pse__Project__r.Name, pse__Project__r.pse__Project_Manager__r.Name, pse__Total_Hours__c, Total_Billable_Amount_Formula__c FROM pse__Timecard__c WHERE pse__Approved__c = true AND pse__Project__r.pse__Project_Manager__r.Name IN ('Lindsay Chown','Will Shorthouse') AND pse__Start_Date__c >= 2026-04-01 AND pse__Start_Date__c <= 2026-04-30 ORDER BY pse__Project__r.pse__Project_Manager__r.Name LIMIT 10000`,
+  ],
+  buildTimecardReportDedup: [
+    Q.buildTimecardReport({ fields: ["pse__Resource__r.Name", "pse__Start_Date__c"], monthStart: "2026-05-01", monthEnd: "2026-05-31", pmNames: ["Josh Wright"], limit: 500 }),
+    `SELECT Id, pse__Resource__r.Name, pse__Project__r.Name, pse__Project__r.pse__Project_Manager__r.Name, pse__Start_Date__c FROM pse__Timecard__c WHERE pse__Approved__c = true AND pse__Project__r.pse__Project_Manager__r.Name IN ('Josh Wright') AND pse__Start_Date__c >= 2026-05-01 AND pse__Start_Date__c <= 2026-05-31 LIMIT 500`,
   ],
   periodByPM: [
     Q.periodByPM(start, end),
@@ -57,6 +74,27 @@ const cases = {
   periodCredited: [
     Q.periodCredited(start, end),
     `SELECT pse__Project__r.pse__Group__r.Name grp, pse__Project__r.pse__Project_Manager__r.Name pm, SUM(pse__Total_Hours__c) hours FROM pse__Timecard__c WHERE pse__Approved__c = true AND pse__Time_Credited__c = true AND Project_Source__c IN ${SRC} AND pse__Start_Date__c >= ${start} AND pse__Start_Date__c <= ${end} GROUP BY pse__Project__r.pse__Group__r.Name, pse__Project__r.pse__Project_Manager__r.Name`,
+  ],
+  periodCreditedByProject: [
+    Q.periodCreditedByProject(start, end),
+    `SELECT pse__Project__c projId, SUM(pse__Total_Hours__c) hours FROM pse__Timecard__c WHERE pse__Approved__c = true AND pse__Time_Credited__c = true AND Project_Source__c IN ${SRC} AND pse__Start_Date__c >= ${start} AND pse__Start_Date__c <= ${end} GROUP BY pse__Project__c`,
+  ],
+  // Account management / QBRs (whole company, no scope filter).
+  sbrNotesInQuarter: [
+    Q.sbrNotesInQuarter(start, end),
+    `SELECT Name, Account__c, Account__r.Name, Date__c, Status__c, SBR_Outcome__c, Client_Temperature__c, X3_Month_Forecast__c, Account_Manager__r.Name, Summary__c, SBR_Outcome_Notes__c, Health_Summary__c, AM_Growth_Notes__c FROM Scheduled_Business_Review__c WHERE Date__c >= ${start} AND Date__c <= ${end} ORDER BY Date__c DESC LIMIT 2000`,
+  ],
+  oppsCreatedInQuarter: [
+    Q.oppsCreatedInQuarter(start, end),
+    `SELECT COUNT(Id) cnt, SUM(Amount) amount FROM Opportunity WHERE DAY_ONLY(CreatedDate) >= ${start} AND DAY_ONLY(CreatedDate) <= ${end}`,
+  ],
+  oppsClosedInQuarter: [
+    Q.oppsClosedInQuarter(start, end),
+    `SELECT IsWon won, COUNT(Id) cnt, SUM(Amount) amount FROM Opportunity WHERE IsClosed = true AND CloseDate >= ${start} AND CloseDate <= ${end} GROUP BY IsWon`,
+  ],
+  oppsCreatedDetail: [
+    Q.oppsCreatedDetail(start, end),
+    `SELECT AccountId, Amount, IsWon, CreatedDate FROM Opportunity WHERE DAY_ONLY(CreatedDate) >= ${start} AND DAY_ONLY(CreatedDate) <= ${end} ORDER BY AccountId LIMIT 5000`,
   ],
   periodVacation: [
     Q.periodVacation(start, end),

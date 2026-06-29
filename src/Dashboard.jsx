@@ -13,6 +13,7 @@ import { Spinner, AuditPanel, ControlsBar } from "./components/index.js";
 import HierarchyTab from "./tabs/HierarchyTab.jsx";
 import UtilizationTab from "./tabs/UtilizationTab.jsx";
 import ResourcePlannerTab from "./tabs/ResourcePlannerTab.jsx";
+import AccountMgmtTab from "./tabs/AccountMgmtTab.jsx";
 import ActualsTab from "./tabs/ActualsTab.jsx";
 import ForecastTab from "./tabs/ForecastTab.jsx";
 import TimeDetailTab from "./tabs/TimeDetailTab.jsx";
@@ -25,7 +26,8 @@ const TABS = [
   { id: "planner", label: "Resource planner" },
   { id: "actuals", label: "Actuals" },
   { id: "forecast", label: "Forecast" },
-  { id: "detail", label: "Time detail" },
+  { id: "detail", label: "Time report" },
+  { id: "accountmgmt", label: "Account management" },
   { id: "audit", label: "Data audit" },
   { id: "options", label: "Options" },
 ];
@@ -51,15 +53,15 @@ export default function Dashboard() {
   const { H, setH, status, saveStatus, saveHierarchy, syncSF, loading: hierLoading, loadMsg: hierLoadMsg } = useHierarchy();
 
   // Shared period actuals (Actuals + Forecast + Time detail tabs).
-  const { dataA, dataB, vacData, detailData, loading, loadMsg, sfError, loadData } = usePeriodData(periodA, periodB);
+  const { dataA, dataB, vacData, loading, loadMsg, sfError, loadData } = usePeriodData(periodA, periodB);
 
   // Data audit.
   const { auditData, auditLoading, fetchAuditData } = useAudit();
 
   // Reload period actuals when the periods change (only while on a data tab),
   // and on first entry to a data tab. Run audit on first entry to its tab.
-  useEffect(() => { if (["actuals", "forecast", "detail"].includes(tab)) loadData(); }, [periodA, periodB]);
-  useEffect(() => { if (["actuals", "forecast", "detail"].includes(tab) && !dataA) loadData(); }, [tab]);
+  useEffect(() => { if (tab === "actuals") loadData(); }, [periodA, periodB]);
+  useEffect(() => { if (tab === "actuals" && !dataA) loadData(); }, [tab]);
   useEffect(() => { if (tab === "audit" && !auditData) fetchAuditData(); }, [tab]);
 
   // Copy the current hierarchy as JSON so it can be committed to data/hierarchy.json
@@ -77,12 +79,12 @@ export default function Dashboard() {
     setTimeout(() => setCopyStatus(""), 4000);
   };
 
-  const showControls = tab === "actuals" || tab === "forecast";
+  const showControls = tab === "actuals";
   const dotColor = status.type === "g" ? B.green : status.type === "a" ? B.amber : status.type === "r" ? B.red : B.lgray;
   const auditBadge = auditData ? (auditData.zeroRates.length + auditData.zeroRevSplits.length + auditData.nullSrc.length) : 0;
 
   return (
-    <div style={{ maxWidth: 980, margin: "0 auto", padding: "0 0 40px", fontFamily: "'Open Sans',sans-serif", position: "relative" }}>
+    <div style={{ margin: 0, padding: "0 20px 40px", fontFamily: "'Open Sans',sans-serif", position: "relative" }}>
       <style>{`${FONT_IMPORT} *{box-sizing:border-box;}`}</style>
 
       {/* Header */}
@@ -145,9 +147,10 @@ export default function Dashboard() {
       {tab === "hierarchy" && <HierarchyTab H={H} setH={setH} loading={hierLoading} loadMsg={hierLoadMsg} />}
       {tab === "utilization" && <UtilizationTab H={H} hState={hState} />}
       {tab === "planner" && <ResourcePlannerTab H={H} hState={hState} />}
-      {!loading && tab === "actuals" && <ActualsTab periodA={periodA} periodB={periodB} dataA={dataA} dataB={dataB} setAuditKey={setAuditKey} />}
-      {!loading && tab === "forecast" && <ForecastTab periodA={periodA} periodB={periodB} dataA={dataA} dataB={dataB} vacData={vacData} hState={hState} setAuditKey={setAuditKey} sendPrompt={sendPrompt} />}
-      {!loading && tab === "detail" && <TimeDetailTab periodA={periodA} detailData={detailData} />}
+      {!loading && tab === "actuals" && <ActualsTab periodA={periodA} periodB={periodB} dataA={dataA} dataB={dataB} setAuditKey={setAuditKey} H={H} hState={hState} />}
+      {tab === "forecast" && <ForecastTab H={H} hState={hState} />}
+      {tab === "detail" && <TimeDetailTab monthOpts={monthOpts} />}
+      {tab === "accountmgmt" && <AccountMgmtTab hState={hState} />}
       {tab === "audit" && <AuditTab auditData={auditData} auditLoading={auditLoading} fetchAuditData={fetchAuditData} />}
       {tab === "options" && <OptionsTab hState={hState} setHState={setHState} periodA={periodA} periodB={periodB} />}
 

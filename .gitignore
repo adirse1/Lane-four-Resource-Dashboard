@@ -2,6 +2,7 @@ node_modules/
 dist/
 server/data/
 server/.sforg
+server/.env
 .env
 .env.local
 *.log
